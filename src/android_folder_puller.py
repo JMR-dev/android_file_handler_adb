@@ -5,22 +5,48 @@ import subprocess
 import requests
 import zipfile
 import io
+import shutil
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 
-ADB_ZIP_URL = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+ADB_WIN_ZIP_URL = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+ADB_LINUX_ZIP_URL = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 LOCAL_ADB_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "platform-tools")
-ADB_EXE_PATH = os.path.join(LOCAL_ADB_FOLDER, "platform-tools", "adb.exe")
+if sys.platform.startswith("linux"):
+    ADB_BINARY_NAME = "adb"
+else:
+    ADB_BINARY_NAME = "adb.exe"
 
-def download_and_extract_adb():
-    if os.path.isfile(ADB_EXE_PATH):
+ADB_BINARY_PATH = os.path.join(LOCAL_ADB_FOLDER, "platform-tools", ADB_BINARY_NAME)
+
+def check_local_disk_space(self):
+        # Check available disk space
+        free_space = shutil.disk_usage(LOCAL_ADB_FOLDER)[2]
+        if free_space < 50 * 1024 * 1024:  # 50MB minimum
+            raise self.report_error("Insufficient disk space") & Exception("Insufficient disk space")
+def download_and_extract_adb(self):
+    if os.path.isfile(ADB_BINARY_PATH):
         return True
     try:
+        if sys.platform.startswith("linux"):
+            ADB_ZIP_URL = ADB_LINUX_ZIP_URL
+        elif sys.platform.startswith("win32"):
+            ADB_ZIP_URL = ADB_WIN_ZIP_URL
+        else:
+            return self.report_error("Unsupported platform")
+        
+        self.check_local_disk_space()
+
         print("Downloading platform-tools (ADB)...")
-        r = requests.get(ADB_ZIP_URL, stream=True)
-        r.raise_for_status()
-        z = zipfile.ZipFile(io.BytesIO(r.content))
-        z.extractall(LOCAL_ADB_FOLDER)
+        
+        response = requests.get(ADB_ZIP_URL, stream=True, timeout=30)
+
+        response.raise_for_status()
+        
+        binaryArchive = zipfile.ZipFile(io.BytesIO(response.content))
+        
+        binaryArchive.extractall(LOCAL_ADB_FOLDER)
+        
         print("Downloaded and extracted platform-tools.")
         return True
     except Exception as e:
@@ -28,7 +54,7 @@ def download_and_extract_adb():
         return False
 
 def run_adb_command(args, capture_output=True):
-    cmd = [ADB_EXE_PATH] + args
+    cmd = [ADB_BINARY_PATH] + args
     try:
         if capture_output:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -54,6 +80,14 @@ class App(tk.Tk):
         self.title("Android Folder Puller")
         self.geometry("520x220")
         self.resizable(False, False)
+                # Add to __init__
+        self.direction_var = tk.StringVar(value="pull")
+        direction_frame = tk.Frame(self)
+        direction_frame.pack(anchor="w", padx=10, pady=(10,0))
+        tk.Radiobutton(direction_frame, text="Pull (Android → PC)", 
+                    variable=self.direction_var, value="pull").pack(side="left")
+        tk.Radiobutton(direction_frame, text="Push (PC → Android)", 
+                    variable=self.direction_var, value="push").pack(side="left", padx=(20,0))
 
         # UI Elements
         tk.Label(self, text="Remote folder path (Android device):").pack(anchor="w", padx=10, pady=(10,0))
@@ -81,7 +115,7 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Check adb availability
-        if not os.path.isfile(ADB_EXE_PATH):
+        if not os.path.isfile(ADB_BINARY_PATH):
             self.disable_controls()
             self.status_label.config(text="ADB not found locally. Downloading...")
             self.update()
@@ -155,11 +189,37 @@ class App(tk.Tk):
         self.disable_controls()
         self.progress["value"] = 0
         self.status_label.config(text="Starting transfer...")
-        threading.Thread(target=self.transfer_folder, args=(remote_path, local_path), daemon=True).start()
+        threading.Thread(target=self.pull_folder, args=(remote_path, local_path), daemon=True).start()
 
-    def transfer_folder(self, remote_path, local_path):
-        # Run adb pull command with progress parsing
-        cmd = [ADB_EXE_PATH, "pull", remote_path, local_path]
+    def pull_folder(self, remote_path, local_path):
+        cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
+        
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                text=True, bufsize=1)
+            
+            for line in proc.stdout:
+                pct = self.parse_progress(line)
+                if pct is not None:
+                    self.update_progress(pct)
+                self.set_status(line.strip())
+            
+            proc.wait()
+            if proc.returncode == 0:
+                self.update_progress(100)
+                self.set_status("Transfer completed successfully.")
+                self.show_disable_debugging_reminder()
+            else:
+                self.report_error(f"Transfer failed with code {proc.returncode}")
+                
+        except Exception as e:
+            self.report_error(f"Transfer error: {e}")
+        finally:
+            self.enable_controls()
+
+    def push_folder_or_file(self, remote_path, local_path):
+        # Run adb push command with progress parsing
+        cmd = [ADB_BINARY_PATH, "push", f"{remote_path}", f"{local_path}"]
 
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
