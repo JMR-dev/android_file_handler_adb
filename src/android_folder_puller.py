@@ -214,9 +214,9 @@ class App(tk.Tk):
         self.destroy()
 
 if __name__ == "__main__":
-    if sys.platform != "win32":
+    if sys.platform not in ["win32", "linux"]:
         tk.Tk().withdraw()
-        messagebox.showerror("Unsupported OS", "This application only supports Windows.")
+        messagebox.showerror("Unsupported OS", "This application only supports Windows or Linux.")
         sys.exit(1)
 
     app = App()
