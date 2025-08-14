@@ -19,23 +19,29 @@ else:
 
 ADB_BINARY_PATH = os.path.join(LOCAL_ADB_FOLDER, "platform-tools", ADB_BINARY_NAME)
 
-def check_local_disk_space(self):
+def check_local_disk_space():
+    try:
         # Check available disk space
         free_space = shutil.disk_usage(LOCAL_ADB_FOLDER)[2]
         if free_space < 50 * 1024 * 1024:  # 50MB minimum
-            raise self.report_error("Insufficient disk space") & Exception("Insufficient disk space")
-def download_and_extract_adb(self):
+            raise Exception("Insufficient disk space")
+    except OSError:
+        # Create directory if it doesn't exist
+        os.makedirs(LOCAL_ADB_FOLDER, exist_ok=True)
+def download_and_extract_adb():
     if os.path.isfile(ADB_BINARY_PATH):
         return True
     try:
+        # Determine the correct URL based on platform
         if sys.platform.startswith("linux"):
             ADB_ZIP_URL = ADB_LINUX_ZIP_URL
-        elif sys.platform.startswith("win32"):
+        elif sys.platform.startswith("win"):
             ADB_ZIP_URL = ADB_WIN_ZIP_URL
         else:
-            return self.report_error("Unsupported platform")
+            print("Unsupported platform")
+            return False
         
-        self.check_local_disk_space()
+        check_local_disk_space()
 
         print("Downloading platform-tools (ADB)...")
         
@@ -74,7 +80,7 @@ def check_device():
             return line.split()[0]
     return None
 
-class App(tk.Tk):
+class App(tk.Tk,):
     def __init__(self):
         super().__init__()
         self.title("Android Folder Puller")
