@@ -2,7 +2,7 @@ import os
 import sys
 import threading
 import subprocess
-import requests
+import requests # type: ignore
 import zipfile
 import io
 import shutil
@@ -12,12 +12,14 @@ from tkinter import messagebox, filedialog, ttk
 ADB_WIN_ZIP_URL = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
 ADB_LINUX_ZIP_URL = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 LOCAL_ADB_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "platform-tools")
-if sys.platform.startswith("linux"):
+OS_TYPE = f"{sys.platform}"
+
+if OS_TYPE.startswith("linux"):
     ADB_BINARY_NAME = "adb"
-else:
+elif OS_TYPE.startswith("win32"):
     ADB_BINARY_NAME = "adb.exe"
 
-ADB_BINARY_PATH = os.path.join(LOCAL_ADB_FOLDER, "platform-tools", ADB_BINARY_NAME)
+ADB_BINARY_PATH = os.path.join(LOCAL_ADB_FOLDER, ADB_BINARY_NAME)
 
 def check_local_disk_space():
     try:
@@ -33,9 +35,9 @@ def download_and_extract_adb():
         return True
     try:
         # Determine the correct URL based on platform
-        if sys.platform.startswith("linux"):
+        if OS_TYPE.startswith("linux"):
             ADB_ZIP_URL = ADB_LINUX_ZIP_URL
-        elif sys.platform.startswith("win"):
+        elif OS_TYPE.startswith("win"):
             ADB_ZIP_URL = ADB_WIN_ZIP_URL
         else:
             print("Unsupported platform")
@@ -52,7 +54,16 @@ def download_and_extract_adb():
         binaryArchive = zipfile.ZipFile(io.BytesIO(response.content))
         
         binaryArchive.extractall(LOCAL_ADB_FOLDER)
-        
+
+        if OS_TYPE.startswith("linux"):
+            if os.path.exists(ADB_BINARY_PATH):
+                os.chmod(ADB_BINARY_PATH, 0o755)
+            elif not os.path.exists(ADB_BINARY_PATH):
+                check_local_disk_space()
+                download_and_extract_adb()
+            else:
+                raise Exception("ADB binary not found after extraction")
+            
         print("Downloaded and extracted platform-tools.")
         return True
     except Exception as e:
@@ -81,27 +92,37 @@ def check_device():
     return None
 
 class App(tk.Tk,):
+
     def __init__(self):
         super().__init__()
         self.title("Android Folder Puller")
-        self.geometry("520x220")
-        self.resizable(False, False)
+        self.geometry("520x320")
+        self.minsize(520, 320)  # Set minimum window size with more vertical space
+        self.resizable(True, True)  # Make window resizable
                 # Add to __init__
         self.direction_var = tk.StringVar(value="pull")
         direction_frame = tk.Frame(self)
         direction_frame.pack(anchor="w", padx=10, pady=(10,0))
-        tk.Radiobutton(direction_frame, text="Pull (Android → PC)", 
+        tk.Radiobutton(direction_frame, text="Pull (Android → Computer)", 
                     variable=self.direction_var, value="pull").pack(side="left")
-        tk.Radiobutton(direction_frame, text="Push (PC → Android)", 
+        tk.Radiobutton(direction_frame, text="Push (Computer → Android)", 
                     variable=self.direction_var, value="push").pack(side="left", padx=(20,0))
+        
 
         # UI Elements
         tk.Label(self, text="Remote folder path (Android device):").pack(anchor="w", padx=10, pady=(10,0))
-        self.remote_path_var = tk.StringVar(value="/sdcard")
-        self.remote_path_entry = tk.Entry(self, textvariable=self.remote_path_var, width=60)
-        self.remote_path_entry.pack(padx=10)
+        self.remote_path_var = tk.StringVar()
+        remote_path_frame = tk.Frame(self)
+        remote_path_frame.pack(fill="x", padx=10)
+        self.remote_path_entry = tk.Entry(remote_path_frame, textvariable=self.remote_path_var, width=50)
+        self.remote_path_entry.pack(side="left", fill="x", expand=True)
+        
+        if OS_TYPE.startswith("linux"):
+            tk.Button(remote_path_frame, text="Browse...", command=self.linux_browse_remote_folder).pack(side="right", padx=(5,0))
+        else:
+            tk.Button(remote_path_frame, text="Browse...", command=self.browse_local_folder).pack(side="right", padx=(5,0))
 
-        tk.Label(self, text="Local destination folder (Windows PC):").pack(anchor="w", padx=10, pady=(10,0))
+        tk.Label(self, text="Local destination folder (Computer):").pack(anchor="w", padx=10, pady=(10,0))
         self.local_path_var = tk.StringVar()
         local_path_frame = tk.Frame(self)
         local_path_frame.pack(fill="x", padx=10)
@@ -109,11 +130,11 @@ class App(tk.Tk,):
         self.local_path_entry.pack(side="left", fill="x", expand=True)
         tk.Button(local_path_frame, text="Browse...", command=self.browse_local_folder).pack(side="right", padx=(5,0))
 
-        self.progress = ttk.Progressbar(self, orient="horizontal", length=500, mode="determinate")
-        self.progress.pack(padx=10, pady=(20, 5))
+        self.progress = ttk.Progressbar(self, orient="horizontal", mode="determinate")
+        self.progress.pack(fill="x", padx=10, pady=(20, 5))
 
         self.status_label = tk.Label(self, text="Status: Idle")
-        self.status_label.pack(anchor="w", padx=10)
+        self.status_label.pack(anchor="w", padx=10, fill="x")
 
         self.start_btn = tk.Button(self, text="Start Transfer", command=self.start_transfer)
         self.start_btn.pack(pady=10)
@@ -145,6 +166,147 @@ class App(tk.Tk,):
             self.show_enable_debugging_instructions()
         else:
             self.status_label.config(text=f"Device detected: {device}")
+    def linux_mount_mtp_device(self):
+        """Mount MTP device to filesystem using jmtpfs"""
+        mount_point = "/tmp/android_mtp"
+        try:
+            # Create mount point
+            os.makedirs(mount_point, exist_ok=True)
+            
+            # Check if already mounted
+            result = subprocess.run(["mountpoint", mount_point], 
+                                capture_output=True, text=True)
+            if result.returncode == 0:
+                return mount_point
+            
+            # First, try to unmount any existing GVFS MTP mounts
+            self._unmount_gvfs_mtp()
+            
+            # Kill any existing MTP processes that might be interfering
+            subprocess.run(["pkill", "-f", "gvfs-mtp"], capture_output=True)
+            subprocess.run(["pkill", "-f", "jmtpfs"], capture_output=True)
+            
+            # Wait a moment for processes to clean up
+            import time
+            time.sleep(1)
+            
+            # Mount using jmtpfs
+            result = subprocess.run(["jmtpfs", mount_point], 
+                                capture_output=True, text=True)
+            if result.returncode == 0:
+                return mount_point
+            else:
+                print(f"Failed to mount MTP device: {result.stderr}")
+                return None
+        except Exception as e:
+            print(f"Error mounting MTP device: {e}")
+            return None
+
+    def _unmount_gvfs_mtp(self):
+        """Unmount any GVFS MTP mounts"""
+        try:
+            # Find GVFS MTP mounts
+            result = subprocess.run(["mount"], capture_output=True, text=True)
+            for line in result.stdout.splitlines():
+                if "gvfs" in line and "mtp" in line:
+                    # Extract mount point from mount line
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        mount_point = parts[2]
+                        subprocess.run(["fusermount", "-u", mount_point], 
+                                     capture_output=True)
+            
+            # Also try to unmount common GVFS locations
+            gvfs_locations = [
+                "/run/user/*/gvfs/mtp*",
+                "/media/*",
+                "~/.gvfs/mtp*"
+            ]
+            
+            for location_pattern in gvfs_locations:
+                result = subprocess.run(["find", "/run/user", "-name", "mtp*", "-type", "d"], 
+                                      capture_output=True, text=True)
+                for mount_point in result.stdout.strip().split('\n'):
+                    if mount_point:
+                        subprocess.run(["fusermount", "-u", mount_point], 
+                                     capture_output=True)
+                        
+        except Exception as e:
+            print(f"Warning: Could not unmount GVFS MTP: {e}")
+
+    def linux_unmount_mtp_device(self):
+        """Unmount MTP device"""
+        mount_point = "/tmp/android_mtp"
+        try:
+            subprocess.run(["fusermount", "-u", mount_point], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to unmount: {e}")
+            return False
+
+    def linux_browse_remote_folder(self):
+        """Browse remote Android folders via MTP"""
+        # First try using existing GVFS mount
+        gvfs_mount = self._find_gvfs_mtp_mount()
+        if gvfs_mount:
+            try:
+                folder = filedialog.askdirectory(initialdir=gvfs_mount, 
+                                            title="Select Android folder")
+                if folder:
+                    # Convert filesystem path back to Android path
+                    relative_path = os.path.relpath(folder, gvfs_mount)
+                    # Clean up the path for Android
+                    if relative_path == ".":
+                        android_path = "/sdcard"
+                    else:
+                        android_path = f"/sdcard/{relative_path}".replace("\\", "/")
+                    self.remote_path_var.set(android_path)
+                return
+            except Exception as e:
+                print(f"GVFS browse failed: {e}")
+        
+        # Fallback to jmtpfs
+        mount_point = self.linux_mount_mtp_device()
+        if mount_point:
+            try:
+                folder = filedialog.askdirectory(initialdir=mount_point, 
+                                            title="Select Android folder")
+                if folder:
+                    # Convert filesystem path back to Android path
+                    relative_path = os.path.relpath(folder, mount_point)
+                    if relative_path == ".":
+                        android_path = "/sdcard"
+                    else:
+                        android_path = f"/sdcard/{relative_path}".replace("\\", "/")
+                    self.remote_path_var.set(android_path)
+            finally:
+                self.linux_unmount_mtp_device()
+        else:
+            messagebox.showerror("Error", "Could not mount Android device via MTP. Make sure it's connected and set to 'File Transfer' mode.")
+
+    def _find_gvfs_mtp_mount(self):
+        """Find existing GVFS MTP mount point"""
+        try:
+            # Check common GVFS mount locations
+            import glob
+            user_id = os.getuid()
+            gvfs_patterns = [
+                f"/run/user/{user_id}/gvfs/mtp*",
+                "/media/*android*",
+                "/media/*MTP*"
+            ]
+            
+            for pattern in gvfs_patterns:
+                matches = glob.glob(pattern)
+                if matches:
+                    # Return the first valid mount point
+                    for mount in matches:
+                        if os.path.isdir(mount):
+                            return mount
+            return None
+        except Exception as e:
+            print(f"Error finding GVFS mount: {e}")
+            return None
 
     def browse_local_folder(self):
         folder = filedialog.askdirectory()
@@ -184,6 +346,7 @@ class App(tk.Tk,):
     def start_transfer(self):
         remote_path = self.remote_path_var.get().strip()
         local_path = self.local_path_var.get().strip()
+        direction = self.direction_var.get()
 
         if not remote_path:
             messagebox.showerror("Input Error", "Remote folder path cannot be empty.")
@@ -194,8 +357,16 @@ class App(tk.Tk,):
 
         self.disable_controls()
         self.progress["value"] = 0
-        self.status_label.config(text="Starting transfer...")
-        threading.Thread(target=self.pull_folder, args=(remote_path, local_path), daemon=True).start()
+        
+        if direction == "pull":
+            self.status_label.config(text="Starting pull transfer...")
+            threading.Thread(target=self.pull_folder, args=(remote_path, local_path), daemon=True).start()
+        elif direction == "push":
+            self.status_label.config(text="Starting push transfer...")
+            threading.Thread(target=self.push_folder, args=(local_path, remote_path), daemon=True).start()
+        else:
+            self.report_error("Invalid transfer direction selected.")
+            self.enable_controls()
 
     def pull_folder(self, remote_path, local_path):
         cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
@@ -223,9 +394,9 @@ class App(tk.Tk,):
         finally:
             self.enable_controls()
 
-    def push_folder_or_file(self, remote_path, local_path):
+    def push_folder(self, local_path,remote_path):
         # Run adb push command with progress parsing
-        cmd = [ADB_BINARY_PATH, "push", f"{remote_path}", f"{local_path}"]
+        cmd = [ADB_BINARY_PATH, "push", f"{local_path}", f"{remote_path}" ]
 
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -233,7 +404,6 @@ class App(tk.Tk,):
             self.report_error(f"Failed to start adb: {e}")
             return
 
-        total_progress = 0
         self.set_status("Transferring files...")
 
         for line in proc.stdout:
