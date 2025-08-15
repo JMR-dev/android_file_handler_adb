@@ -1,26 +1,128 @@
 """
-Debug script for troubleshooting ADB device detection issues.
-
-This script provides comprehensive debugging information for ADB connectivity,
-including binary path verification, device detection, and command execution testing.
+Debug large transfer ADB output
 """
 
-import os
 import sys
+import subprocess
+import re
+import time
+import os
 
 # Add the src directory to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
-from adb_manager import ADBManager
+from adb_manager import ADB_BINARY_PATH
+
+
+def debug_large_transfer_output():
+    """Debug what ADB output looks like for large transfers."""
+
+    print("=== DEBUGGING LARGE TRANSFER ADB OUTPUT ===")
+    print("This will show you what ADB actually outputs during large transfers.")
+    print("Use Ctrl+C to stop when you see enough output.\n")
+
+    # Get user input for paths
+    remote_path = input("Enter remote path (e.g., /sdcard/DCIM): ").strip()
+    if not remote_path:
+        remote_path = "/sdcard/DCIM"
+
+    local_path = input("Enter local path (e.g., C:\\temp\\debug_transfer): ").strip()
+    if not local_path:
+        local_path = "C:\\temp\\debug_transfer"
+
+    print(f"\nDebugging transfer: {remote_path} -> {local_path}")
+    print("ADB output analysis:\n")
+
+    cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        line_count = 0
+        progress_lines = []
+
+        if proc.stdout:
+            for line in proc.stdout:
+                line_count += 1
+                line_clean = line.strip()
+
+                # Check for progress information
+                progress_match = re.search(r"\((\d{1,3})%\)", line)
+
+                # Log interesting lines
+                if (
+                    progress_match
+                    or "%" in line
+                    or line_count <= 20
+                    or line_count % 100 == 0
+                ):
+                    print(f"Line {line_count:4d}: {line_clean}")
+
+                    if progress_match:
+                        pct = int(progress_match.group(1))
+                        progress_lines.append((line_count, pct, line_clean))
+
+                # Show periodic updates for very long transfers
+                if line_count % 500 == 0:
+                    print(f"... ({line_count} lines processed) ...")
+
+        proc.wait()
+
+        print(f"\n=== TRANSFER COMPLETED ===")
+        print(f"Total lines: {line_count}")
+        print(f"Return code: {proc.returncode}")
+        print(f"Progress lines found: {len(progress_lines)}")
+
+        if progress_lines:
+            print("\nProgress line analysis:")
+            for line_num, pct, text in progress_lines:
+                print(f"  Line {line_num}: {pct}% - {text}")
+        else:
+            print("No explicit progress percentages found in output!")
+            print("This explains why large transfers don't show progress.")
+
+    except KeyboardInterrupt:
+        print(f"\n\nStopped at line {line_count}")
+        if proc:
+            proc.terminate()
+
+        if progress_lines:
+            print(f"Progress lines found so far: {len(progress_lines)}")
+            for line_num, pct, text in progress_lines[-5:]:  # Show last 5
+                print(f"  Line {line_num}: {pct}% - {text}")
+
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 def main():
-    """Run comprehensive ADB debugging tests."""
+    """Debug large transfer functionality."""
+    print("Choose debug option:")
+    print("1. Debug large transfer ADB output")
+    print("2. Run original ADB detection tests")
+
+    choice = input("Enter choice (1 or 2): ").strip()
+
+    if choice == "1":
+        debug_large_transfer_output()
+    else:
+        debug_original_adb_detection()
+
+
+def debug_original_adb_detection():
+    """Original ADB debugging functionality."""
+    from adb_manager import ADBManager
+
     print("=== ADB Device Detection Debug ===\n")
 
     # Test 1: Check if ADB binary exists
     adb_manager = ADBManager()
-    from adb_manager import ADB_BINARY_PATH
 
     adb_path = ADB_BINARY_PATH
     print(f"1. ADB Binary Path: {adb_path}")
