@@ -39,6 +39,9 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.adb_manager.set_progress_callback(self.update_progress)
         self.adb_manager.set_status_callback(self.set_status)
 
+        # Transfer tracking for thread safety
+        self.current_transfer_id = 0
+
         if get_platform_type().startswith("linux"):
             self.mtp_manager = LinuxMTPManager()
         else:
@@ -590,7 +593,12 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.start_btn.config(state="disabled")
 
     def enable_controls(self):
-        """Enable UI controls after operations."""
+        """Enable UI controls after operations (thread-safe)."""
+        # Schedule UI update on main thread
+        self.after(0, self._enable_controls_ui)
+
+    def _enable_controls_ui(self):
+        """Internal method to enable controls on main thread."""
         self.remote_path_entry.config(state="normal")
         self.local_path_entry.config(state="normal")
         self.start_btn.config(state="normal")
@@ -609,7 +617,12 @@ class AndroidFileHandlerGUI(tk.Tk):
         messagebox.showinfo("Enable USB Debugging", msg)
 
     def show_disable_debugging_reminder(self):
-        """Show reminder to disable USB debugging after transfer."""
+        """Show reminder to disable USB debugging after transfer (thread-safe)."""
+        # Schedule UI update on main thread
+        self.after(0, self._show_debugging_reminder_ui)
+
+    def _show_debugging_reminder_ui(self):
+        """Internal method to show debugging reminder on main thread."""
         msg = (
             "Transfer completed.\n\n"
             "For security, disable USB debugging when done:\n"
@@ -634,57 +647,100 @@ class AndroidFileHandlerGUI(tk.Tk):
             return
 
         # Start transfer
+        self.current_transfer_id += 1
+        transfer_id = self.current_transfer_id
+
         self.disable_controls()
-        self.progress["value"] = 0
+        # Reset progress bar in thread-safe way
+        self._update_progress_ui(0)
 
         if direction == "pull":
             self.set_status("Starting pull transfer...")
             threading.Thread(
-                target=self._pull_thread, args=(remote_path, local_path), daemon=True
+                target=self._pull_thread,
+                args=(remote_path, local_path, transfer_id),
+                daemon=True,
             ).start()
         elif direction == "push":
             self.set_status("Starting push transfer...")
             threading.Thread(
-                target=self._push_thread, args=(local_path, remote_path), daemon=True
+                target=self._push_thread,
+                args=(local_path, remote_path, transfer_id),
+                daemon=True,
             ).start()
         else:
             self.report_error("Invalid transfer direction selected.")
             self.enable_controls()
 
-    def _pull_thread(self, remote_path: str, local_path: str):
+    def _pull_thread(self, remote_path: str, local_path: str, transfer_id: int):
         """Thread function for pull operations."""
         try:
+            # Check if this transfer is still current
+            if self.current_transfer_id != transfer_id:
+                return
+
             success = self.adb_manager.pull_folder(remote_path, local_path)
-            if success:
+            if success and self.current_transfer_id == transfer_id:
                 self.show_disable_debugging_reminder()
         except Exception as e:
-            self.report_error(f"Pull operation failed: {e}")
+            if self.current_transfer_id == transfer_id:
+                self.report_error(f"Pull operation failed: {e}")
         finally:
-            self.enable_controls()
+            if self.current_transfer_id == transfer_id:
+                self.enable_controls()
 
-    def _push_thread(self, local_path: str, remote_path: str):
+    def _push_thread(self, local_path: str, remote_path: str, transfer_id: int):
         """Thread function for push operations."""
         try:
+            # Check if this transfer is still current
+            if self.current_transfer_id != transfer_id:
+                return
+
             success = self.adb_manager.push_folder(local_path, remote_path)
-            if success:
+            if success and self.current_transfer_id == transfer_id:
                 self.show_disable_debugging_reminder()
         except Exception as e:
-            self.report_error(f"Push operation failed: {e}")
+            if self.current_transfer_id == transfer_id:
+                self.report_error(f"Push operation failed: {e}")
         finally:
-            self.enable_controls()
+            if self.current_transfer_id == transfer_id:
+                self.enable_controls()
 
     def update_progress(self, percentage: int):
-        """Update the progress bar."""
+        """Update the progress bar (thread-safe)."""
+
+        # Schedule UI update on main thread using a proper closure
+        def update_ui():
+            self._update_progress_ui(percentage)
+
+        self.after(0, update_ui)
+
+    def _update_progress_ui(self, percentage: int):
+        """Internal method to update progress bar on main thread."""
         self.progress["value"] = percentage
         self.update_idletasks()
 
     def set_status(self, message: str):
-        """Update the status label."""
+        """Update the status label (thread-safe)."""
+
+        # Schedule UI update on main thread using a proper closure
+        def update_ui():
+            self._set_status_ui(message)
+
+        self.after(0, update_ui)
+
+    def _set_status_ui(self, message: str):
+        """Internal method to update status on main thread."""
         self.status_label.config(text=f"Status: {message}")
         self.update_idletasks()
 
     def report_error(self, message: str):
-        """Report an error to the user."""
+        """Report an error to the user (thread-safe)."""
+        # Schedule UI update on main thread
+        self.after(0, lambda: self._report_error_ui(message))
+
+    def _report_error_ui(self, message: str):
+        """Internal method to report error on main thread."""
         self.status_label.config(text=f"Error: {message}")
         messagebox.showerror("Error", message)
         self.enable_controls()

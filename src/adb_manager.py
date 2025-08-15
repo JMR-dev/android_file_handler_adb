@@ -157,6 +157,10 @@ class ADBManager:
         cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
 
         try:
+            # Start with initial progress
+            self._update_progress(0)
+            self._update_status("Starting transfer...")
+
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -165,11 +169,22 @@ class ADBManager:
                 bufsize=1,
             )
 
+            line_count = 0
+            last_progress = 0
             if proc.stdout:
                 for line in proc.stdout:
+                    line_count += 1
                     pct = self.parse_progress(line)
                     if pct is not None:
                         self._update_progress(pct)
+                        last_progress = pct
+                    else:
+                        # If no explicit progress, simulate some progress based on activity
+                        if line_count % 5 == 0 and last_progress < 90:
+                            estimated_progress = min(last_progress + 5, 90)
+                            self._update_progress(estimated_progress)
+                            last_progress = estimated_progress
+
                     self._update_status(line.strip())
 
             proc.wait()
@@ -190,6 +205,10 @@ class ADBManager:
         cmd = [ADB_BINARY_PATH, "push", local_path, remote_path]
 
         try:
+            # Start with initial progress
+            self._update_progress(0)
+            self._update_status("Starting transfer...")
+
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -201,13 +220,22 @@ class ADBManager:
             self._update_status(f"Failed to start adb: {e}")
             return False
 
-        self._update_status("Transferring files...")
-
+        line_count = 0
+        last_progress = 0
         if proc.stdout:
             for line in proc.stdout:
+                line_count += 1
                 pct = self.parse_progress(line)
                 if pct is not None:
                     self._update_progress(pct)
+                    last_progress = pct
+                else:
+                    # If no explicit progress, simulate some progress based on activity
+                    if line_count % 5 == 0 and last_progress < 90:
+                        estimated_progress = min(last_progress + 5, 90)
+                        self._update_progress(estimated_progress)
+                        last_progress = estimated_progress
+
                 self._update_status(line.strip())
 
         proc.wait()
