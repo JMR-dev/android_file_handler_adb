@@ -1,1 +1,6 @@
 src/platform-tools
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class

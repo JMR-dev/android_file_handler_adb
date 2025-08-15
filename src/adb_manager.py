@@ -144,17 +144,66 @@ class ADBManager:
         return None
 
     def parse_progress(self, text_line: str) -> Optional[int]:
-        """Parse progress percentage from ADB output."""
+        """Parse progress percentage from ADB output with enhanced patterns for large transfers."""
+        # Original pattern: (XX%)
         m = re.search(r"\((\d{1,3})%\)", text_line)
         if m:
             pct = int(m.group(1))
             if 0 <= pct <= 100:
                 return pct
+
+        # Additional patterns for large transfers
+        # Pattern: XX% complete
+        m = re.search(r"(\d{1,3})%\s+complete", text_line, re.IGNORECASE)
+        if m:
+            pct = int(m.group(1))
+            if 0 <= pct <= 100:
+                return pct
+
+        # Pattern: transferred XX%
+        m = re.search(r"transferred\s+(\d{1,3})%", text_line, re.IGNORECASE)
+        if m:
+            pct = int(m.group(1))
+            if 0 <= pct <= 100:
+                return pct
+
+        # Pattern: XX files pulled/pushed (XX%)
+        m = re.search(
+            r"\d+\s+files?\s+(?:pulled|pushed).*?\((\d{1,3})%\)",
+            text_line,
+            re.IGNORECASE,
+        )
+        if m:
+            pct = int(m.group(1))
+            if 0 <= pct <= 100:
+                return pct
+
         return None
 
     def pull_folder(self, remote_path: str, local_path: str) -> bool:
         """Pull files from Android device to local machine."""
+        # Normalize paths for better compatibility
+        local_path = os.path.normpath(local_path)
+        remote_path = remote_path.strip()
+
+        # Ensure local directory exists
+        try:
+            os.makedirs(local_path, exist_ok=True)
+        except Exception as e:
+            self._update_status(f"Failed to create local directory: {e}")
+            return False
+
+        # For Windows root drives, ensure proper formatting
+        if os.name == "nt" and len(local_path) == 3 and local_path.endswith(":\\"):
+            # Root drive path like C:\ - this might cause issues with ADB
+            self._update_status(
+                "Warning: Transferring to root drive. Consider using a subfolder."
+            )
+
         cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
+
+        # Debug output for troubleshooting
+        self._update_status(f"Command: adb pull '{remote_path}' '{local_path}'")
 
         try:
             # Start with initial progress
@@ -171,19 +220,59 @@ class ADBManager:
 
             line_count = 0
             last_progress = 0
+            start_time = time.time()
+            last_update_time = start_time
+
             if proc.stdout:
                 for line in proc.stdout:
                     line_count += 1
+                    current_time = time.time()
                     pct = self.parse_progress(line)
+
                     if pct is not None:
+                        # Use explicit progress when available
                         self._update_progress(pct)
                         last_progress = pct
+                        last_update_time = current_time
                     else:
-                        # If no explicit progress, simulate some progress based on activity
-                        if line_count % 5 == 0 and last_progress < 90:
-                            estimated_progress = min(last_progress + 5, 90)
-                            self._update_progress(estimated_progress)
-                            last_progress = estimated_progress
+                        # Improved progress estimation for large transfers
+                        elapsed_time = current_time - start_time
+                        time_since_last_update = current_time - last_update_time
+
+                        # Calculate progress based on multiple factors
+                        should_update = False
+                        new_progress = last_progress
+
+                        # Time-based progress (update every 2 seconds)
+                        if time_since_last_update >= 2.0 and last_progress < 95:
+                            # Estimate progress based on activity and time
+                            if line_count > 100:
+                                # For large transfers, use a logarithmic approach
+                                activity_factor = min(
+                                    line_count / 1000, 50
+                                )  # Max 50% from activity
+                                time_factor = min(
+                                    elapsed_time / 60, 40
+                                )  # Max 40% from time (assumes 1-2 min transfers)
+                                new_progress = min(activity_factor + time_factor, 95)
+                            else:
+                                # For smaller transfers, use the original approach
+                                new_progress = min(last_progress + 10, 95)
+
+                            should_update = True
+
+                        # Line-based progress (for very active transfers)
+                        elif line_count % 50 == 0 and last_progress < 90:
+                            # More conservative line-based updates
+                            increment = max(1, min(5, 90 // (line_count // 50 + 1)))
+                            new_progress = min(last_progress + increment, 90)
+                            should_update = True
+
+                        # Update progress if needed
+                        if should_update and new_progress > last_progress:
+                            self._update_progress(int(new_progress))
+                            last_progress = new_progress
+                            last_update_time = current_time
 
                     self._update_status(line.strip())
 
@@ -193,7 +282,16 @@ class ADBManager:
                 self._update_status("Transfer completed successfully.")
                 return True
             else:
-                self._update_status(f"Transfer failed with code {proc.returncode}")
+                # Capture error output for better debugging
+                error_msg = f"Transfer failed with code {proc.returncode}"
+                if hasattr(proc, "stderr") and proc.stderr:
+                    try:
+                        stderr_output = proc.stderr.read()
+                        if stderr_output:
+                            error_msg += f". Error: {stderr_output}"
+                    except:
+                        pass
+                self._update_status(error_msg)
                 return False
 
         except Exception as e:
@@ -202,7 +300,26 @@ class ADBManager:
 
     def push_folder(self, local_path: str, remote_path: str) -> bool:
         """Push files from local machine to Android device."""
+        # Normalize paths for better compatibility
+        local_path = os.path.normpath(local_path)
+        remote_path = remote_path.strip()
+
+        # Validate local path exists
+        if not os.path.exists(local_path):
+            self._update_status(f"Local path does not exist: {local_path}")
+            return False
+
+        # For Windows root drives, ensure proper formatting
+        if os.name == "nt" and len(local_path) == 3 and local_path.endswith(":\\"):
+            # Root drive path like C:\ - this might cause issues with ADB
+            self._update_status(
+                "Warning: Pushing from root drive. Consider using a subfolder."
+            )
+
         cmd = [ADB_BINARY_PATH, "push", local_path, remote_path]
+
+        # Debug output for troubleshooting
+        self._update_status(f"Command: adb push '{local_path}' '{remote_path}'")
 
         try:
             # Start with initial progress
@@ -222,19 +339,59 @@ class ADBManager:
 
         line_count = 0
         last_progress = 0
+        start_time = time.time()
+        last_update_time = start_time
+
         if proc.stdout:
             for line in proc.stdout:
                 line_count += 1
+                current_time = time.time()
                 pct = self.parse_progress(line)
+
                 if pct is not None:
+                    # Use explicit progress when available
                     self._update_progress(pct)
                     last_progress = pct
+                    last_update_time = current_time
                 else:
-                    # If no explicit progress, simulate some progress based on activity
-                    if line_count % 5 == 0 and last_progress < 90:
-                        estimated_progress = min(last_progress + 5, 90)
-                        self._update_progress(estimated_progress)
-                        last_progress = estimated_progress
+                    # Improved progress estimation for large transfers
+                    elapsed_time = current_time - start_time
+                    time_since_last_update = current_time - last_update_time
+
+                    # Calculate progress based on multiple factors
+                    should_update = False
+                    new_progress = last_progress
+
+                    # Time-based progress (update every 2 seconds)
+                    if time_since_last_update >= 2.0 and last_progress < 95:
+                        # Estimate progress based on activity and time
+                        if line_count > 100:
+                            # For large transfers, use a logarithmic approach
+                            activity_factor = min(
+                                line_count / 1000, 50
+                            )  # Max 50% from activity
+                            time_factor = min(
+                                elapsed_time / 60, 40
+                            )  # Max 40% from time (assumes 1-2 min transfers)
+                            new_progress = min(activity_factor + time_factor, 95)
+                        else:
+                            # For smaller transfers, use the original approach
+                            new_progress = min(last_progress + 10, 95)
+
+                        should_update = True
+
+                    # Line-based progress (for very active transfers)
+                    elif line_count % 50 == 0 and last_progress < 90:
+                        # More conservative line-based updates
+                        increment = max(1, min(5, 90 // (line_count // 50 + 1)))
+                        new_progress = min(last_progress + increment, 90)
+                        should_update = True
+
+                    # Update progress if needed
+                    if should_update and new_progress > last_progress:
+                        self._update_progress(int(new_progress))
+                        last_progress = new_progress
+                        last_update_time = current_time
 
                 self._update_status(line.strip())
 
@@ -244,7 +401,16 @@ class ADBManager:
             self._update_status("Transfer completed successfully.")
             return True
         else:
-            self._update_status(f"adb push failed with return code {proc.returncode}")
+            # Capture error output for better debugging
+            error_msg = f"Push failed with code {proc.returncode}"
+            if hasattr(proc, "stderr") and proc.stderr:
+                try:
+                    stderr_output = proc.stderr.read()
+                    if stderr_output:
+                        error_msg += f". Error: {stderr_output}"
+                except:
+                    pass
+            self._update_status(error_msg)
             return False
 
 
