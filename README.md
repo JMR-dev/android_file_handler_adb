@@ -1,5 +1,5 @@
 
-# Android Folder Puller (ADB)
+# Android File Handler (ADB)
 
 A simple Windows GUI tool to pull folders from an Android device using ADB (Android Debug Bridge). The tool automatically downloads the latest ADB platform-tools if not present, checks for a connected device, and provides a user-friendly interface for selecting remote and local folders.
 
@@ -13,8 +13,8 @@ A simple Windows GUI tool to pull folders from an Android device using ADB (Andr
 
 ## Requirements
 
-- Windows OS
-- Python 3.7+
+- Windows or Linux
+- Python 3.8+
 - [Poetry](https://python-poetry.org/) for dependency management
 
 ## Installation
