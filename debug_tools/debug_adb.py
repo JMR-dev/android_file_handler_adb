@@ -11,7 +11,7 @@ import os
 # Add the src directory to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
-from adb_manager import ADB_BINARY_PATH
+from src.adb_manager import ADB_BINARY_PATH
 
 
 def debug_large_transfer_output():
@@ -117,7 +117,7 @@ def main():
 
 def debug_original_adb_detection():
     """Original ADB debugging functionality."""
-    from adb_manager import ADBManager
+    from src.adb_manager import ADBManager
 
     print("=== ADB Device Detection Debug ===\n")
 

@@ -5,7 +5,8 @@ Test script to verify progress callback is working
 import sys
 import os
 
-sys.path.insert(0, "src")
+# Add the src directory to Python path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 from adb_manager import ADBManager
 import time

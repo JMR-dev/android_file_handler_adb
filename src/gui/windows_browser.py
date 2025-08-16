@@ -5,7 +5,7 @@ Provides Android filesystem browsing capabilities for Windows using ADB.
 
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk, simpledialog
+from tkinter import messagebox, ttk
 
 
 class WindowsAndroidBrowser:
@@ -404,22 +404,8 @@ class WindowsAndroidBrowser:
             else:
                 messagebox.showwarning("No Selection", "Please select a valid folder.")
 
-        def enter_custom_path():
-            """Allow user to enter a custom path."""
-            browser_window.destroy()
-            custom_path = simpledialog.askstring(
-                "Custom Path",
-                "Enter custom Android folder path:",
-                initialvalue="/sdcard/",
-            )
-            if custom_path:
-                self.remote_path_var.set(custom_path.strip())
-
         tk.Button(
             button_frame, text="Select This Folder", command=select_current_folder
-        ).pack(side="left", padx=5)
-        tk.Button(
-            button_frame, text="Enter Custom Path", command=enter_custom_path
         ).pack(side="left", padx=5)
         tk.Button(button_frame, text="Cancel", command=browser_window.destroy).pack(
             side="left", padx=5
