@@ -5,8 +5,10 @@ Debug folder name parsing from ADB ls output
 
 import sys
 import subprocess
+import os
 
-sys.path.insert(0, "src")
+# Add the src directory to Python path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 from adb_manager import ADB_BINARY_PATH
 

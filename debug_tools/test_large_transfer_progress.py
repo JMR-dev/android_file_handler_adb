@@ -6,8 +6,10 @@ Test improved progress calculation for large transfers
 import sys
 import time
 import threading
+import os
 
-sys.path.insert(0, "src")
+# Add the src directory to Python path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 from gui.main_window import AndroidFileHandlerGUI
 

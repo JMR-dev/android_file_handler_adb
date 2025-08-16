@@ -26,9 +26,16 @@ except ImportError:
         is_adb_available,
     )
 
-from .progress_handler import ProgressHandler
-from .windows_browser import WindowsAndroidBrowser
-from .linux_browser import LinuxAndroidBrowser
+try:
+    # Try relative imports first
+    from .progress_handler import ProgressHandler
+    from .windows_browser import WindowsAndroidBrowser
+    from .linux_browser import LinuxAndroidBrowser
+except ImportError:
+    # Fall back to direct imports
+    from progress_handler import ProgressHandler
+    from windows_browser import WindowsAndroidBrowser
+    from linux_browser import LinuxAndroidBrowser
 
 
 class AndroidFileHandlerGUI(tk.Tk):
@@ -253,17 +260,25 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.check_device_connection()
 
     def show_enable_debugging_instructions(self):
-        """Show instructions for enabling USB debugging."""
+        """Show instructions to connect device, enable file transfer, and to enable USB debugging."""
         msg = (
+            "Additionally, ensure your device is set to 'File Transfer' mode:\n"
+            "1. When you connect your device, swipe down to check the notification panel.\n"
+            "2. Look for a 'USB' notification that will tell you what mode the device is in (usually 'Charging over USB') and tap it.\n"
+            "3. Select 'File Transfer' or 'MTP' mode.\n\n"
+            "Please ensure your Android device is securely connected to the computer at both ends.\n\n"
             "To enable USB debugging:\n"
-            "1. Open Settings → About phone.\n"
-            "2. Tap 'Build number' seven times to unlock Developer Options.\n"
-            "3. Go back to Settings → Developer Options.\n"
-            "4. Enable 'USB debugging'.\n"
-            "5. Connect your phone via USB and accept the prompt to allow debugging.\n\n"
-            "After enabling, click 'Recheck for connected Android device' to try again."
+            "1. Connect your device to the computer via USB.\n"
+            "2. Open Settings → About phone.\n"
+            "3. Tap 'Build number' seven times to unlock Developer Options.\n"
+            "4. Go back to Settings → Developer Options.\n"
+            "5. Enable 'USB debugging'.\n"
+            "6. Connect your phone via USB and accept the prompt to allow debugging.\n\n"
+            "After enabling USB debugging, please click the 'Recheck for connected Android device' button to try again."
         )
-        result = messagebox.showinfo("Enable USB Debugging", msg)
+        result = messagebox.showinfo(
+            "Check device connection and enable USB Debugging", msg
+        )
         # After user clicks OK, ensure recheck button is enabled
         self.after(0, self._enable_recheck_after_dialog)
 
@@ -280,8 +295,8 @@ class AndroidFileHandlerGUI(tk.Tk):
     def _show_debugging_reminder_ui(self):
         """Internal method to show debugging reminder on main thread."""
         msg = (
-            "Transfer completed.\n\n"
-            "For security, disable USB debugging when done:\n"
+            "Transfer completed!\n\n"
+            "For security, please disable USB debugging when done:\n"
             "Settings → Developer Options → disable 'USB debugging'."
         )
         messagebox.showinfo("Disable USB Debugging", msg)
@@ -290,10 +305,23 @@ class AndroidFileHandlerGUI(tk.Tk):
         """Start the file transfer operation."""
         # Double-check device is still connected before starting transfer
         if not self.device_connected:
-            messagebox.showerror(
-                "No Device",
-                "No Android device is connected. Please connect your device and enable USB debugging.",
+            msg = (
+                "Android device appears to have been disconnected and/or USB debugging is disabled.\n"
+                "Please ensure your Android device is securely connected to the computer at both ends.\n\n"
+                "Additionally, ensure your device is set to 'File Transfer' mode:\n"
+                "1. When you connect your device, swipe down to check the notification panel.\n"
+                "2. Look for a 'USB' notification that will tell you what mode the device is in (usually 'Charging over USB') and tap it.\n"
+                "3. Select 'File Transfer' or 'MTP' mode.\n\n"
+                "To enable USB debugging:\n"
+                "1. Connect your device to the computer via USB.\n"
+                "2. Open Settings → About phone.\n"
+                "3. Tap 'Build number' seven times to unlock Developer Options.\n"
+                "4. Go back to Settings → Developer Options.\n"
+                "5. Enable 'USB debugging'.\n"
+                "6. Connect your phone via USB and accept the prompt to allow debugging.\n\n"
+                "After enabling USB debugging, please click the 'Recheck for connected Android device' button to try again."
             )
+            messagebox.showerror("No Android Device Detected", msg)
             self._switch_to_recheck_mode()
             return
 
