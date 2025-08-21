@@ -11,10 +11,11 @@ from tkinter import messagebox, ttk
 class AndroidFileBrowser:
     """Android filesystem browser for Windows using ADB."""
 
-    def __init__(self, parent_window, adb_manager, remote_path_var):
+    def __init__(self, parent_window, adb_manager, remote_path_var, path_changed_callback=None):
         self.parent = parent_window
         self.adb_manager = adb_manager
         self.remote_path_var = remote_path_var
+        self.path_changed_callback = path_changed_callback
 
     def show_browser(self, direction="pull"):
         """Show a browsable Android folder tree. 
@@ -469,11 +470,15 @@ class AndroidFileBrowser:
                         else:
                             # It's a file and we're in pull mode - select the file path directly
                             self.remote_path_var.set(item_path)
+                            if self.path_changed_callback:
+                                self.path_changed_callback()
                             browser_window.destroy()
                             return
                     elif len(item_values) >= 2 and item_values[1] == "folder":
                         # It's a folder - select the folder path directly
                         self.remote_path_var.set(item_path)
+                        if self.path_changed_callback:
+                            self.path_changed_callback()
                         browser_window.destroy()
                         return
             
@@ -481,6 +486,8 @@ class AndroidFileBrowser:
             current_path = current_path_var.get()
             if current_path and current_path.strip():
                 self.remote_path_var.set(current_path)
+                if self.path_changed_callback:
+                    self.path_changed_callback()
                 browser_window.destroy()
             else:
                 selection_type = "folder" if direction == "push" else "file or folder"
