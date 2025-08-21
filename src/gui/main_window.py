@@ -238,7 +238,6 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def _start_transfer_animation(self):
         """Start the 'Transferring...' animation."""
-        print("[DEBUG] Starting transfer animation")
         self.transfer_dots = 0
         self.transfer_animation_job = True  # Mark as active before starting
         self._animate_transfer_text()
@@ -249,7 +248,6 @@ class AndroidFileHandlerGUI(tk.Tk):
             dots = "." * (self.transfer_dots + 1)
             status_text = f"Transferring{dots}"
             self.status_label.config(text=status_text)
-            print(f"[DEBUG] Animation update: {status_text}")  # Debug output
             self.update_idletasks()  # Force immediate UI update
             self.transfer_dots = (self.transfer_dots + 1) % 5  # Cycle 0-4 dots
             # Schedule next update in 500ms
@@ -257,7 +255,6 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def _stop_transfer_animation(self):
         """Stop the transfer animation."""
-        print("[DEBUG] Stopping transfer animation")
         if self.transfer_animation_job is not None:
             if isinstance(self.transfer_animation_job, str):  # It's an after job ID
                 self.after_cancel(self.transfer_animation_job)
@@ -294,6 +291,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.device_connected = False
             self.disable_controls()
             self._disable_browse_buttons()
+            self._clear_paths_and_disable_button()
             self._update_status(
                 "No Android devices detected. Please check the USB connection at both ends is securely inserted, USB debugging is enabled, and that File Transfer mode is turned on."
             )
@@ -436,7 +434,6 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def cancel_transfer(self):
         """Cancel the current transfer."""
-        print("[DEBUG] Cancel transfer requested")
         
         # Cancel the actual ADB process
         cancelled = self.adb_manager.cancel_transfer()
@@ -550,6 +547,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             # Device is no longer connected, update status and reset to recheck mode
             self.device_connected = False
             self._disable_browse_buttons()
+            self._clear_paths_and_disable_button()
             self._update_status(
                 "No Android devices detected. Please check the USB connection at both ends is securely inserted, USB debugging is enabled, and that File Transfer mode is turned on."
             )
@@ -745,6 +743,7 @@ class AndroidFileHandlerGUI(tk.Tk):
         """Handle device disconnection during transfers."""
         self.device_connected = False
         self._disable_browse_buttons()
+        self._clear_paths_and_disable_button()
         self._update_status(
             "No Android devices detected. Please check the USB connection at both ends is securely inserted, USB debugging is enabled, and that File Transfer mode is turned on."
         )

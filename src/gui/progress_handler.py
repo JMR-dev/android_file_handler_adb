@@ -41,12 +41,6 @@ class ProgressHandler:
         # Ensure percentage is within valid range
         percentage = max(0.0, min(100.0, percentage))
         
-        # Debug output for large transfer troubleshooting
-        if bytes_total is not None:
-            print(f"[DEBUG] Progress update called: {percentage:.1f}% ({bytes_transferred_or_percentage}/{bytes_total} bytes)")
-        else:
-            print(f"[DEBUG] Progress update called: {percentage:.1f}%")
-
         # Schedule UI update on main thread using a proper closure
         def update_ui() -> None:
             self._update_progress_ui(percentage)
@@ -59,12 +53,10 @@ class ProgressHandler:
         Args:
             percentage: Progress percentage (0.0 to 100.0) - used for logging only in indeterminate mode
         """
-        # Debug output for large transfer troubleshooting
-        print(f"[DEBUG] Progress update: {percentage:.1f}% (indeterminate mode, transfer_active: {self._transfer_active})")
-
+        
         # Only log significant progress jumps (10% or more)
         if abs(percentage - self._last_percentage) >= 10.0:
-            print(f"[DEBUG] Major progress jump: {self._last_percentage:.1f}% -> {percentage:.1f}%")
+            pass  # Could add non-debug logging here if needed
         
         self._last_percentage = percentage
 
@@ -72,15 +64,13 @@ class ProgressHandler:
             # Only start animation if we're in an active transfer and progress > 0
             if self._transfer_active and percentage > 0 and percentage < 100:
                 self.progress_bar.start(10)  # 10ms interval for smooth animation
-                print(f"[DEBUG] Progress bar animation started")
             elif percentage >= 100:
                 self.progress_bar.stop()  # Stop animation when complete
                 self._transfer_active = False  # Transfer is done
-                print(f"[DEBUG] Progress bar animation stopped (transfer complete)")
             
             self.parent.update_idletasks()
         except Exception as exception_error:
-            print(f"[DEBUG] Error updating progress bar: {exception_error}")
+            pass  # Silent error handling
 
     def reset_progress(self) -> None:
         """Reset progress bar to 0 (thread-safe)."""
@@ -89,17 +79,15 @@ class ProgressHandler:
                 self.progress_bar.stop()  # Stop any animation
                 self._last_percentage = 0.0
                 self._transfer_active = False  # Not in a transfer
-                print(f"[DEBUG] Progress bar reset (stopped animation)")
                 self.parent.update_idletasks()
             except Exception as exception_error:
-                print(f"[DEBUG] Error resetting progress bar: {exception_error}")
+                pass  # Silent error handling for reset operation
 
         self.parent.after(0, update_ui)
 
     def start_transfer(self) -> None:
         """Mark that a transfer is starting (enables progress animation)."""
         self._transfer_active = True
-        print(f"[DEBUG] Transfer marked as active")
 
     def set_status(self, message: str) -> None:
         """Set the status label text (thread-safe).
@@ -123,4 +111,4 @@ class ProgressHandler:
             self.status_label.config(text=message)
             self.parent.update_idletasks()
         except Exception as exception_error:
-            print(f"[DEBUG] Error updating status label: {exception_error}")
+            pass  # Silent error handling
