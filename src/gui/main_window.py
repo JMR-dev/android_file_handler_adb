@@ -139,7 +139,7 @@ class AndroidFileHandlerGUI(tk.Tk):
 
         # Start/Recheck button (will change based on device state)
         self.start_btn = tk.Button(
-            self, text="Start Transfer", command=self.handle_button_click
+            self, text="Start Transfer", command=self.handle_button_click, state="disabled"
         )
         self.start_btn.pack(pady=10)
 
@@ -158,7 +158,7 @@ class AndroidFileHandlerGUI(tk.Tk):
 
         # Browser component
         self.browser = AndroidFileBrowser(
-            self, self.adb_manager, self.remote_path_var
+            self, self.adb_manager, self.remote_path_var, self._validate_paths_and_update_button
         )
 
     def _update_progress(self, percentage):
@@ -177,6 +177,30 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.update_idletasks()
         
         self.after(0, update_ui)
+
+    def _validate_paths_and_update_button(self):
+        """Check if both paths are selected and update button state accordingly."""
+        remote_path = self.remote_path_var.get().strip()
+        local_path = self.local_path_var.get().strip()
+        
+        # Check if both paths are set and not the default placeholder text
+        remote_selected = remote_path and remote_path != "Please select file or folder ->"
+        local_selected = local_path and local_path != "Please select file or folder ->"
+        
+        # Only manage state if button is in "Start Transfer" mode
+        if self.start_btn.cget("text") == "Start Transfer":
+            if remote_selected and local_selected:
+                self.start_btn.config(state="normal")
+            else:
+                self.start_btn.config(state="disabled")
+
+    def _clear_paths_and_disable_button(self):
+        """Clear path selections and disable the transfer button."""
+        self.remote_path_var.set("Please select file or folder ->")
+        self.local_path_var.set("Please select file or folder ->")
+        # Only disable if button is in "Start Transfer" mode
+        if self.start_btn.cget("text") == "Start Transfer":
+            self.start_btn.config(state="disabled")
 
     def _start_transfer_animation(self):
         """Start the 'Transferring...' animation."""
@@ -283,6 +307,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             # If user cancels both dialogs, selected_path will be empty and nothing happens
             if selected_path:
                 self.local_path_var.set(selected_path)
+                self._validate_paths_and_update_button()
                 
         else:  # pull direction
             # For pull, only allow folder selection (destination)
@@ -292,6 +317,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             )
             if folder:
                 self.local_path_var.set(folder)
+                self._validate_paths_and_update_button()
 
     def disable_controls(self):
         """Disable UI controls during operations."""
@@ -341,8 +367,10 @@ class AndroidFileHandlerGUI(tk.Tk):
     def _switch_to_transfer_mode(self):
         """Switch button to transfer mode."""
         self.start_btn.config(
-            text="Start Transfer", command=self.start_transfer, state="normal"
+            text="Start Transfer", command=self.start_transfer
         )
+        # Only enable if both paths are selected, otherwise keep disabled
+        self._validate_paths_and_update_button()
 
     def _switch_to_cancel_mode(self):
         """Switch button to cancel transfer mode."""
@@ -530,6 +558,8 @@ class AndroidFileHandlerGUI(tk.Tk):
                 transfer_desc = "File" if is_file else "Folder"
                 self._update_status(f"{transfer_desc} transfer completed successfully.")
                 self.show_disable_debugging_reminder()
+                # Clear paths and disable button for next transfer
+                self.after(0, self._clear_paths_and_disable_button)
         except Exception as e:
             if self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
@@ -554,6 +584,8 @@ class AndroidFileHandlerGUI(tk.Tk):
                 self._stop_transfer_animation()
                 self._update_status("Transfer completed successfully.")
                 self.show_disable_debugging_reminder()
+                # Clear paths and disable button for next transfer
+                self.after(0, self._clear_paths_and_disable_button)
         except Exception as e:
             if self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
@@ -577,6 +609,8 @@ class AndroidFileHandlerGUI(tk.Tk):
                 self._stop_transfer_animation()
                 self._update_status("Transfer completed successfully.")
                 self.show_disable_debugging_reminder()
+                # Clear paths and disable button for next transfer
+                self.after(0, self._clear_paths_and_disable_button)
         except Exception as e:
             if self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
