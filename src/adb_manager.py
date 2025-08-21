@@ -429,6 +429,196 @@ class ADBManager:
             self.current_process = None
             return False
 
+    def pull_file(self, remote_file_path: str, local_file_path: str) -> bool:
+        """Pull a single file from Android device to local machine."""
+        # Normalize paths for better compatibility
+        local_file_path = os.path.normpath(local_file_path)
+        remote_file_path = remote_file_path.strip()
+
+        # Ensure local directory exists
+        local_dir = os.path.dirname(local_file_path)
+        try:
+            if local_dir:  # Only create if there's a directory part
+                os.makedirs(local_dir, exist_ok=True)
+        except Exception as e:
+            self._update_status(f"Failed to create local directory: {e}")
+            return False
+
+        # For Windows root drives, ensure proper formatting
+        if os.name == "nt":
+            # Check if this is a root drive (like C:\, D:\, etc.)
+            normalized_path = os.path.abspath(local_dir)
+            drive_root = os.path.splitdrive(normalized_path)[0] + os.sep
+            if normalized_path == drive_root:
+                # Root drive path like C:\ - this might cause issues with ADB
+                self._update_status(
+                    "Warning: Transferring to root drive. Consider using a subfolder."
+                )
+
+        cmd = [ADB_BINARY_PATH, "pull", remote_file_path, local_file_path]
+
+        # Debug output for troubleshooting
+        self._update_status(f"Command: adb pull '{remote_file_path}' '{local_file_path}'")
+
+        try:
+            # Start with initial progress
+            self._update_progress(0)
+            self._update_status("Starting file transfer...")
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            self.current_process = proc
+
+            line_count = 0
+            last_progress = 0
+            start_time = time.time()
+            last_update_time = start_time
+
+            if proc.stdout:
+                for line in proc.stdout:
+                    line_count += 1
+                    current_time = time.time()
+                    pct = self.parse_progress(line)
+
+                    if pct is not None:
+                        # Use explicit progress when available
+                        self._update_progress(pct)
+                        last_progress = pct
+                        last_update_time = current_time
+                    else:
+                        # For single files, use simpler progress estimation
+                        elapsed_time = current_time - start_time
+                        if elapsed_time >= 1.0 and last_progress < 90:
+                            # Simple time-based progress for files
+                            new_progress = min(last_progress + 20, 90)
+                            self._update_progress(int(new_progress))
+                            last_progress = new_progress
+                            last_update_time = current_time
+
+                    self._update_status(line.strip())
+
+            proc.wait()
+            if proc.returncode == 0:
+                self._update_progress(100)
+                self._update_status("File transfer completed successfully.")
+                self.current_process = None
+                return True
+            else:
+                # Capture error output for better debugging
+                error_msg = f"File transfer failed with code {proc.returncode}"
+                if hasattr(proc, "stderr") and proc.stderr:
+                    try:
+                        stderr_output = proc.stderr.read()
+                        if stderr_output:
+                            error_msg += f". Error: {stderr_output}"
+                    except:
+                        pass
+                self._update_status(error_msg)
+                self.current_process = None
+                return False
+
+        except Exception as e:
+            self._update_status(f"File transfer error: {e}")
+            self.current_process = None
+            return False
+
+    def push_file(self, local_file_path: str, remote_file_path: str) -> bool:
+        """Push a single file from local machine to Android device."""
+        # Normalize paths for better compatibility
+        local_file_path = os.path.normpath(local_file_path)
+        remote_file_path = remote_file_path.strip()
+
+        # Validate local file exists
+        if not os.path.isfile(local_file_path):
+            self._update_status(f"Local file does not exist: {local_file_path}")
+            return False
+
+        # For Windows root drives, ensure proper formatting
+        if os.name == "nt":
+            # Check if this is a root drive (like C:\, D:\, etc.)
+            normalized_path = os.path.abspath(local_file_path)
+            drive_root = os.path.splitdrive(normalized_path)[0] + os.sep
+            if os.path.dirname(normalized_path) == drive_root.rstrip(os.sep):
+                # File in root drive - this might cause issues with ADB
+                self._update_status(
+                    "Warning: Pushing from root drive. Consider using a subfolder."
+                )
+
+        cmd = [ADB_BINARY_PATH, "push", local_file_path, remote_file_path]
+
+        # Debug output for troubleshooting
+        self._update_status(f"Command: adb push '{local_file_path}' '{remote_file_path}'")
+
+        try:
+            # Start with initial progress
+            self._update_progress(0)
+            self._update_status("Starting file transfer...")
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            self.current_process = proc
+        except Exception as e:
+            self._update_status(f"Failed to start adb: {e}")
+            return False
+
+        line_count = 0
+        last_progress = 0
+        start_time = time.time()
+        last_update_time = start_time
+
+        if proc.stdout:
+            for line in proc.stdout:
+                line_count += 1
+                current_time = time.time()
+                pct = self.parse_progress(line)
+
+                if pct is not None:
+                    # Use explicit progress when available
+                    self._update_progress(pct)
+                    last_progress = pct
+                    last_update_time = current_time
+                else:
+                    # For single files, use simpler progress estimation
+                    elapsed_time = current_time - start_time
+                    if elapsed_time >= 1.0 and last_progress < 90:
+                        # Simple time-based progress for files
+                        new_progress = min(last_progress + 20, 90)
+                        self._update_progress(int(new_progress))
+                        last_progress = new_progress
+                        last_update_time = current_time
+
+                self._update_status(line.strip())
+
+        proc.wait()
+        if proc.returncode == 0:
+            self._update_progress(100)
+            self._update_status("File transfer completed successfully.")
+            self.current_process = None
+            return True
+        else:
+            # Capture error output for better debugging
+            error_msg = f"File push failed with code {proc.returncode}"
+            if hasattr(proc, "stderr") and proc.stderr:
+                try:
+                    stderr_output = proc.stderr.read()
+                    if stderr_output:
+                        error_msg += f". Error: {stderr_output}"
+                except:
+                    pass
+            self._update_status(error_msg)
+            self.current_process = None
+            return False
+
     def cancel_transfer(self) -> bool:
         """Cancel the current transfer operation."""
         if self.current_process is not None:

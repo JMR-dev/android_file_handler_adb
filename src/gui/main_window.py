@@ -243,14 +243,46 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.enable_controls()
 
     def browse_remote_folder(self):
-        """Browse remote Android folders."""
+        """Browse remote Android files and folders."""
         self.browser.show_browser()
 
     def browse_local_folder(self):
-        """Browse for local folder."""
-        folder = filedialog.askdirectory()
-        if folder:
-            self.local_path_var.set(folder)
+        """Browse for local folder or file based on direction."""
+        direction = self.direction_var.get()
+        
+        if direction == "push":
+            # For push, show a unified dialog that handles both files and folders
+            # Start with file selection dialog that has "Open" and "Cancel"
+            # If user selects a file, use it. If they navigate and click "Cancel" on file dialog,
+            # we'll assume they want to select the current folder
+            
+            import tkinter.filedialog as fd
+            import os
+            
+            # Use askopenfilename but allow folder selection by providing both options
+            # First try file selection
+            selected_path = fd.askopenfilename(
+                title="Select file to push (or Cancel and then select folder)",
+                filetypes=[("All files", "*.*")]
+            )
+            
+            # If no file was selected, offer folder selection
+            if not selected_path:
+                selected_path = fd.askdirectory(
+                    title="Select folder to push to Android device"
+                )
+            
+            # Set the path if something was selected
+            if selected_path:
+                self.local_path_var.set(selected_path)
+                
+        else:  # pull direction
+            # For pull, only allow folder selection (destination)
+            folder = filedialog.askdirectory(
+                title="Select destination folder for pulled files"
+            )
+            if folder:
+                self.local_path_var.set(folder)
 
     def disable_controls(self):
         """Disable UI controls during operations."""
@@ -406,13 +438,22 @@ class AndroidFileHandlerGUI(tk.Tk):
 
         # Validate inputs
         if not remote_path:
-            messagebox.showerror("Input Error", "Remote folder path cannot be empty.")
+            messagebox.showerror("Input Error", "Remote path cannot be empty.")
             return
-        if not local_path or not os.path.isdir(local_path):
-            messagebox.showerror(
-                "Input Error", "Please select a valid local destination folder."
-            )
-            return
+        
+        # For push operations, validate local path
+        if direction == "push":
+            if not local_path or (not os.path.isfile(local_path) and not os.path.isdir(local_path)):
+                messagebox.showerror(
+                    "Input Error", "Please select a valid local file or folder."
+                )
+                return
+        else:  # pull operations
+            if not local_path or not os.path.isdir(local_path):
+                messagebox.showerror(
+                    "Input Error", "Please select a valid local destination folder for pulled files."
+                )
+                return
 
         # Final device check before transfer
         device = self.adb_manager.check_device()
@@ -435,21 +476,62 @@ class AndroidFileHandlerGUI(tk.Tk):
         # Start the transfer animation
         self._start_transfer_animation()
 
+        # Determine if we're dealing with files or folders
         if direction == "pull":
+            # For pull, check if remote path is a file
+            is_file = self._is_remote_file(remote_path)
             threading.Thread(
-                target=self._pull_thread,
-                args=(remote_path, local_path, transfer_id),
+                target=self._transfer_thread,
+                args=(direction, remote_path, local_path, transfer_id, is_file),
                 daemon=True,
             ).start()
         elif direction == "push":
+            # For push, check if local path is a file
+            is_file = os.path.isfile(local_path)
             threading.Thread(
-                target=self._push_thread,
-                args=(local_path, remote_path, transfer_id),
+                target=self._transfer_thread,
+                args=(direction, local_path, remote_path, transfer_id, is_file),
                 daemon=True,
             ).start()
         else:
             self.report_error("Invalid transfer direction selected.")
             self.enable_controls()
+
+    def _transfer_thread(self, direction: str, source_path: str, dest_path: str, transfer_id: int, is_file: bool):
+        """Unified thread function for all transfer operations."""
+        try:
+            # Check if this transfer is still current
+            if self.current_transfer_id != transfer_id:
+                return
+
+            # Get the appropriate transfer method
+            transfer_method, transfer_type = self._get_file_transfer_methods(direction, is_file)
+            
+            # For pull operations with files, we need to construct the full destination path
+            if direction == "pull" and is_file:
+                # Extract filename from source and append to destination directory
+                filename = source_path.split("/")[-1]
+                full_dest_path = os.path.join(dest_path, filename)
+                success = transfer_method(source_path, full_dest_path)
+            else:
+                success = transfer_method(source_path, dest_path)
+            
+            if success and self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
+                transfer_desc = "File" if is_file else "Folder"
+                self._update_status(f"{transfer_desc} transfer completed successfully.")
+                self.show_disable_debugging_reminder()
+        except Exception as e:
+            if self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
+                transfer_desc = "file" if is_file else "folder"
+                self.report_error(f"{direction.capitalize()} {transfer_desc} operation failed: {e}")
+        finally:
+            if self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
+                self.enable_controls()
+                # Restore proper button state after transfer
+                self.after(0, self._restore_button_state)
 
     def _pull_thread(self, remote_path: str, local_path: str, transfer_id: int):
         """Thread function for pull operations."""
@@ -503,6 +585,35 @@ class AndroidFileHandlerGUI(tk.Tk):
             self._switch_to_transfer_mode()
         else:
             self._switch_to_recheck_mode()
+
+    def _is_remote_file(self, remote_path: str) -> bool:
+        """Check if the remote path points to a file (not a directory)."""
+        try:
+            # Use ls -la to check if it's a file
+            result = self.adb_manager.run_adb_command(
+                ["shell", "ls", "-la", remote_path]
+            )
+            if isinstance(result, tuple) and len(result) == 3:
+                stdout, stderr, returncode = result
+                if returncode == 0 and stdout:
+                    # If the output starts with '-', it's a regular file
+                    return stdout.strip().startswith('-')
+            return False
+        except Exception:
+            return False
+
+    def _get_file_transfer_methods(self, direction: str, is_file: bool):
+        """Get the appropriate transfer methods based on direction and type."""
+        if direction == "pull":
+            if is_file:
+                return self.adb_manager.pull_file, "file"
+            else:
+                return self.adb_manager.pull_folder, "folder"
+        else:  # push
+            if is_file:
+                return self.adb_manager.push_file, "file"
+            else:
+                return self.adb_manager.push_folder, "folder"
 
     def report_error(self, message: str):
         """Report an error to the user (thread-safe)."""
