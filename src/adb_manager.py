@@ -195,11 +195,15 @@ class ADBManager:
             return False
 
         # For Windows root drives, ensure proper formatting
-        if os.name == "nt" and len(local_path) == 3 and local_path.endswith(":\\"):
-            # Root drive path like C:\ - this might cause issues with ADB
-            self._update_status(
-                "Warning: Transferring to root drive. Consider using a subfolder."
-            )
+        if os.name == "nt":
+            # Check if this is a root drive (like C:\, D:\, etc.)
+            normalized_path = os.path.abspath(local_path)
+            drive_root = os.path.splitdrive(normalized_path)[0] + os.sep
+            if normalized_path == drive_root:
+                # Root drive path like C:\ - this might cause issues with ADB
+                self._update_status(
+                    "Warning: Transferring to root drive. Consider using a subfolder."
+                )
 
         cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
 
@@ -315,11 +319,15 @@ class ADBManager:
             return False
 
         # For Windows root drives, ensure proper formatting
-        if os.name == "nt" and len(local_path) == 3 and local_path.endswith(":\\"):
-            # Root drive path like C:\ - this might cause issues with ADB
-            self._update_status(
-                "Warning: Pushing from root drive. Consider using a subfolder."
-            )
+        if os.name == "nt":
+            # Check if this is a root drive (like C:\, D:\, etc.)
+            normalized_path = os.path.abspath(local_path)
+            drive_root = os.path.splitdrive(normalized_path)[0] + os.sep
+            if normalized_path == drive_root:
+                # Root drive path like C:\ - this might cause issues with ADB
+                self._update_status(
+                    "Warning: Pushing from root drive. Consider using a subfolder."
+                )
 
         cmd = [ADB_BINARY_PATH, "push", local_path, remote_path]
 
