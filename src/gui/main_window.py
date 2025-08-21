@@ -135,9 +135,18 @@ class AndroidFileHandlerGUI(tk.Tk):
         # Initially arrange for pull (Android on top)
         self._arrange_path_sections()
 
-        # Status label
-        self.status_label = tk.Label(self, text="Status: Idle")
-        self.status_label.pack(anchor="w", padx=10, fill="x", pady=(20, 5))
+        # Status label (responsive with word wrapping)
+        self.status_label = tk.Label(
+            self, 
+            text="Status: Idle", 
+            wraplength=0,  # Will be set dynamically
+            justify="center",
+            anchor="center"
+        )
+        self.status_label.pack(padx=10, fill="x", pady=(20, 5))
+        
+        # Bind window resize event to update label wrapping
+        self.bind("<Configure>", self._on_window_configure)
 
         # Start/Recheck button (will change based on device state)
         self.start_btn = tk.Button(
@@ -182,6 +191,16 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.update_idletasks()
         
         self.after(0, update_ui)
+
+    def _on_window_configure(self, event):
+        """Handle window resize events to update label wrapping."""
+        # Only handle configure events for the main window, not child widgets
+        if event.widget == self:
+            # Calculate available width for the status label
+            # Account for padding (10px on each side) and some margin
+            available_width = self.winfo_width() - 40
+            if available_width > 100:  # Minimum reasonable width
+                self.status_label.config(wraplength=available_width)
 
     def _validate_paths_and_update_button(self):
         """Check if both paths are selected and update button state accordingly."""
@@ -276,7 +295,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.disable_controls()
             self._disable_browse_buttons()
             self._update_status(
-                "No device detected. Enable USB debugging and connect your device."
+                "No Android devices detected. Please check the USB connection at both ends is securely inserted, USB debugging is enabled, and that File Transfer mode is turned on."
             )
             self._switch_to_recheck_mode()
             self.show_enable_debugging_instructions()
@@ -447,14 +466,62 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def show_enable_debugging_instructions(self):
         """Show instructions to connect device, enable file transfer, and to enable USB debugging."""
-        msg = (
-            self.troubleshooting_steps + "\n\n"
+        # Create custom dialog window
+        dialog = tk.Toplevel(self)
+        dialog.title("Check device connection and enable USB Debugging")
+        dialog.geometry("700x450")  # Increased height for better button spacing
+        dialog.minsize(700, 450)  # Set minimum size to current default
+        dialog.resizable(True, True)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Center the dialog on the parent window
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() // 2) - (700 // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (450 // 2)
+        dialog.geometry(f"700x450+{x}+{y}")
+        
+        # Create main frame
+        main_frame = tk.Frame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Create responsive text label
+        text_label = tk.Label(
+            main_frame,
+            text=self.troubleshooting_steps,
+            justify="left",
+            anchor="nw",
+            wraplength=0,  # Will be set dynamically
+            font=("Arial", 10)
         )
-        result = messagebox.showinfo(
-            "Check device connection and enable USB Debugging", msg
+        text_label.pack(fill="both", expand=True, pady=(0, 20))
+        
+        # OK button
+        ok_button = tk.Button(
+            main_frame,
+            text="OK",
+            command=dialog.destroy,
+            width=10,
+            font=("Arial", 10)
         )
+        ok_button.pack(pady=10)
+        
+        # Configure text wrapping on dialog resize
+        def on_dialog_configure(event):
+            if event.widget == dialog:
+                # Calculate available width for text (account for padding and margins)
+                available_width = dialog.winfo_width() - 60  # 20px padding * 2 + some margin
+                if available_width > 200:  # Minimum reasonable width
+                    text_label.config(wraplength=available_width)
+        
+        dialog.bind("<Configure>", on_dialog_configure)
+        
+        # Set initial wrap length
+        dialog.after(10, lambda: on_dialog_configure(type('Event', (), {'widget': dialog})()))
+        
         # After user clicks OK, ensure recheck button is enabled
-        self.after(0, self._enable_recheck_after_dialog)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: [dialog.destroy(), self.after(0, self._enable_recheck_after_dialog)])
+        ok_button.config(command=lambda: [dialog.destroy(), self.after(0, self._enable_recheck_after_dialog)])
 
     def _enable_recheck_after_dialog(self):
         """Re-enable recheck button after user dismisses the dialog."""
@@ -477,6 +544,25 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def start_transfer(self):
         """Start the file transfer operation."""
+        # Recheck device connectivity status before starting transfer
+        device = self.adb_manager.check_device()
+        if not device:
+            # Device is no longer connected, update status and reset to recheck mode
+            self.device_connected = False
+            self._disable_browse_buttons()
+            self._update_status(
+                "No Android devices detected. Please check the USB connection at both ends is securely inserted, USB debugging is enabled, and that File Transfer mode is turned on."
+            )
+            self._switch_to_recheck_mode()
+            self.show_enable_debugging_instructions()
+            return
+        else:
+            # Device is still connected, update status if needed
+            if not self.device_connected:
+                self.device_connected = True
+                self._enable_browse_buttons()
+                self._update_status(f"Device detected: {device}")
+
         # Double-check device is still connected before starting transfer
         if not self.device_connected:
             msg = (
@@ -556,6 +642,15 @@ class AndroidFileHandlerGUI(tk.Tk):
         try:
             # Check if this transfer is still current
             if self.current_transfer_id != transfer_id:
+                return
+
+            # Recheck device connectivity before proceeding with transfer
+            device = self.adb_manager.check_device()
+            if not device:
+                # Device disconnected during transfer setup
+                if self.current_transfer_id == transfer_id:
+                    self._stop_transfer_animation()
+                    self.after(0, self._handle_device_disconnection)
                 return
 
             # Get the appropriate transfer method
@@ -645,6 +740,17 @@ class AndroidFileHandlerGUI(tk.Tk):
             self._switch_to_transfer_mode()
         else:
             self._switch_to_recheck_mode()
+
+    def _handle_device_disconnection(self):
+        """Handle device disconnection during transfers."""
+        self.device_connected = False
+        self._disable_browse_buttons()
+        self._update_status(
+            "No Android devices detected. Please check the USB connection at both ends is securely inserted, USB debugging is enabled, and that File Transfer mode is turned on."
+        )
+        self._switch_to_recheck_mode()
+        self.enable_controls()
+        self.show_enable_debugging_instructions()
 
     def _is_remote_file(self, remote_path: str) -> bool:
         """Check if the remote path points to a file (not a directory)."""
