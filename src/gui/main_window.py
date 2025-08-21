@@ -80,45 +80,54 @@ class AndroidFileHandlerGUI(tk.Tk):
             text="Pull (Android → Computer)",
             variable=self.direction_var,
             value="pull",
+            command=self._on_direction_change,
         ).pack(side="left")
         tk.Radiobutton(
             direction_frame,
             text="Push (Computer → Android)",
             variable=self.direction_var,
             value="push",
+            command=self._on_direction_change,
         ).pack(side="left", padx=(20, 0))
 
-        # Remote folder path
-        tk.Label(self, text="Remote folder path (Android device):").pack(
-            anchor="w", padx=10, pady=(10, 0)
-        )
+        # Create a container frame for the path sections that can be reordered
+        self.path_container = tk.Frame(self)
+        self.path_container.pack(fill="x", padx=10, pady=(10, 0))
+
+        # Create the Android device path section
+        self.android_frame = tk.Frame(self.path_container)
+        self.android_label = tk.Label(self.android_frame, text="Android device:")
+        self.android_label.pack(anchor="w")
+        
+        android_path_frame = tk.Frame(self.android_frame)
+        android_path_frame.pack(fill="x", pady=(0, 10))
         self.remote_path_var = tk.StringVar()
-        remote_path_frame = tk.Frame(self)
-        remote_path_frame.pack(fill="x", padx=10)
         self.remote_path_entry = tk.Entry(
-            remote_path_frame, textvariable=self.remote_path_var, width=50
+            android_path_frame, textvariable=self.remote_path_var, width=50
         )
         self.remote_path_entry.pack(side="left", fill="x", expand=True)
-
-        # Browse button for remote path
         tk.Button(
-            remote_path_frame, text="Browse...", command=self.browse_remote_folder
+            android_path_frame, text="Browse...", command=self.browse_remote_folder
         ).pack(side="right", padx=(5, 0))
 
-        # Local folder path
-        tk.Label(self, text="Local destination folder (Computer):").pack(
-            anchor="w", padx=10, pady=(10, 0)
-        )
+        # Create the Computer path section
+        self.computer_frame = tk.Frame(self.path_container)
+        self.computer_label = tk.Label(self.computer_frame, text="Computer:")
+        self.computer_label.pack(anchor="w")
+        
+        computer_path_frame = tk.Frame(self.computer_frame)
+        computer_path_frame.pack(fill="x", pady=(0, 10))
         self.local_path_var = tk.StringVar()
-        local_path_frame = tk.Frame(self)
-        local_path_frame.pack(fill="x", padx=10)
         self.local_path_entry = tk.Entry(
-            local_path_frame, textvariable=self.local_path_var, width=50
+            computer_path_frame, textvariable=self.local_path_var, width=50
         )
         self.local_path_entry.pack(side="left", fill="x", expand=True)
         tk.Button(
-            local_path_frame, text="Browse...", command=self.browse_local_folder
+            computer_path_frame, text="Browse...", command=self.browse_local_folder
         ).pack(side="right", padx=(5, 0))
+
+        # Initially arrange for pull (Android on top)
+        self._arrange_path_sections()
 
         # Status label
         self.status_label = tk.Label(self, text="Status: Idle")
@@ -259,6 +268,26 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.remote_path_entry.config(state="normal")
         self.local_path_entry.config(state="normal")
         # Button state is handled by mode switching methods
+
+    def _on_direction_change(self):
+        """Handle radio button direction change."""
+        self._arrange_path_sections()
+
+    def _arrange_path_sections(self):
+        """Arrange the Android and Computer path sections based on direction."""
+        # Remove both frames from container
+        self.android_frame.pack_forget()
+        self.computer_frame.pack_forget()
+        
+        direction = self.direction_var.get()
+        if direction == "pull":
+            # Pull: Android → Computer (Android on top)
+            self.android_frame.pack(fill="x", pady=(0, 5))
+            self.computer_frame.pack(fill="x")
+        else:  # push
+            # Push: Computer → Android (Computer on top)
+            self.computer_frame.pack(fill="x", pady=(0, 5))
+            self.android_frame.pack(fill="x")
 
     def _switch_to_recheck_mode(self):
         """Switch button to recheck device mode."""
