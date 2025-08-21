@@ -13,29 +13,21 @@ try:
     # Try relative import first (when used as module)
     from ..adb_manager import (
         ADBManager,
-        LinuxMTPManager,
-        get_platform_type,
         is_adb_available,
     )
 except ImportError:
     # Fall back to direct import (when run directly)
     from adb_manager import (
         ADBManager,
-        LinuxMTPManager,
-        get_platform_type,
         is_adb_available,
     )
 
 try:
     # Try relative imports first
-    from .progress_handler import ProgressHandler
-    from .windows_browser import WindowsAndroidBrowser
-    from .linux_browser import LinuxAndroidBrowser
+    from .file_browser import AndroidFileBrowser
 except ImportError:
     # Fall back to direct imports
-    from progress_handler import ProgressHandler
-    from windows_browser import WindowsAndroidBrowser
-    from linux_browser import LinuxAndroidBrowser
+    from src.gui.file_browser import AndroidFileBrowser
 
 
 class AndroidFileHandlerGUI(tk.Tk):
@@ -51,11 +43,6 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.current_transfer_id = 0
         self.device_connected = False  # Track device connection state
 
-        if get_platform_type().startswith("linux"):
-            self.mtp_manager = LinuxMTPManager()
-        else:
-            self.mtp_manager = None
-
         # Setup UI
         self._setup_ui()
         self._initialize_components()
@@ -64,7 +51,7 @@ class AndroidFileHandlerGUI(tk.Tk):
     def _setup_ui(self):
         """Setup the user interface."""
         # Window configuration
-        self.title("Android Folder Puller")
+        self.title("Android File Handler")
         self.geometry("520x320")
         self.minsize(520, 320)
         self.resizable(True, True)
@@ -118,13 +105,9 @@ class AndroidFileHandlerGUI(tk.Tk):
             local_path_frame, text="Browse...", command=self.browse_local_folder
         ).pack(side="right", padx=(5, 0))
 
-        # Progress bar
-        self.progress = ttk.Progressbar(self, orient="horizontal", mode="determinate")
-        self.progress.pack(fill="x", padx=10, pady=(20, 5))
-
         # Status label
         self.status_label = tk.Label(self, text="Status: Idle")
-        self.status_label.pack(anchor="w", padx=10, fill="x")
+        self.status_label.pack(anchor="w", padx=10, fill="x", pady=(20, 5))
 
         # Start/Recheck button (will change based on device state)
         self.start_btn = tk.Button(
@@ -137,34 +120,76 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def _initialize_components(self):
         """Initialize GUI components and handlers."""
-        # Progress handler
-        self.progress_handler = ProgressHandler(self, self.progress, self.status_label)
+        # Transfer animation state
+        self.transfer_animation_job = None
+        self.transfer_dots = 0
+        
+        # Set up ADB callbacks to our own methods
+        self.adb_manager.set_progress_callback(self._update_progress)
+        self.adb_manager.set_status_callback(self._update_status)
 
-        # Set up ADB callbacks
-        self.adb_manager.set_progress_callback(self.progress_handler.update_progress)
-        self.adb_manager.set_status_callback(self.progress_handler.set_status)
-
-        # Browser components
-        self.windows_browser = WindowsAndroidBrowser(
+        # Browser component
+        self.browser = AndroidFileBrowser(
             self, self.adb_manager, self.remote_path_var
         )
-        self.linux_browser = LinuxAndroidBrowser(
-            self, self.mtp_manager, self.remote_path_var
-        )
+
+    def _update_progress(self, percentage):
+        """Handle progress updates (simplified)."""
+        # We ignore the percentage and just rely on status updates
+        pass
+
+    def _update_status(self, message: str):
+        """Update status label (thread-safe)."""
+        # Don't update status if transfer animation is running
+        if self.transfer_animation_job is not None:
+            return  # Ignore ADB status updates during transfer animation
+        
+        def update_ui():
+            self.status_label.config(text=message)
+            self.update_idletasks()
+        
+        self.after(0, update_ui)
+
+    def _start_transfer_animation(self):
+        """Start the 'Transferring...' animation."""
+        print("[DEBUG] Starting transfer animation")
+        self.transfer_dots = 0
+        self.transfer_animation_job = True  # Mark as active before starting
+        self._animate_transfer_text()
+
+    def _animate_transfer_text(self):
+        """Animate the transfer text with dots."""
+        if self.transfer_animation_job is not None:
+            dots = "." * (self.transfer_dots + 1)
+            status_text = f"Transferring{dots}"
+            self.status_label.config(text=status_text)
+            print(f"[DEBUG] Animation update: {status_text}")  # Debug output
+            self.update_idletasks()  # Force immediate UI update
+            self.transfer_dots = (self.transfer_dots + 1) % 5  # Cycle 0-4 dots
+            # Schedule next update in 500ms
+            self.transfer_animation_job = self.after(500, self._animate_transfer_text)
+
+    def _stop_transfer_animation(self):
+        """Stop the transfer animation."""
+        print("[DEBUG] Stopping transfer animation")
+        if self.transfer_animation_job is not None:
+            if isinstance(self.transfer_animation_job, str):  # It's an after job ID
+                self.after_cancel(self.transfer_animation_job)
+            self.transfer_animation_job = None
 
     def _initialize_app(self):
         """Initialize the application - check ADB and device."""
         # Check adb availability
         if not is_adb_available():
             self.disable_controls()
-            self.progress_handler.set_status("ADB not found locally. Downloading...")
+            self._update_status("ADB not found locally. Downloading...")
             self.update()
             success = self.adb_manager.download_and_extract_adb()
             if success:
-                self.progress_handler.set_status("ADB downloaded and ready.")
+                self._update_status("ADB downloaded and ready.")
                 self.enable_controls()
             else:
-                self.progress_handler.set_status(
+                self._update_status(
                     "Failed to download ADB. Please check your internet and restart."
                 )
                 messagebox.showerror("Error", "Failed to download ADB tools. Exiting.")
@@ -176,31 +201,26 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def check_device_connection(self):
         """Check for device connection and update UI accordingly."""
-        self.progress_handler.set_status("Checking for connected device...")
+        self._update_status("Checking for connected device...")
         self.update()
         device = self.adb_manager.check_device()
         if not device:
             self.device_connected = False
             self.disable_controls()
-            self.progress_handler.set_status(
+            self._update_status(
                 "No device detected. Enable USB debugging and connect your device."
             )
             self._switch_to_recheck_mode()
             self.show_enable_debugging_instructions()
         else:
             self.device_connected = True
-            self.progress_handler.set_status(f"Device detected: {device}")
+            self._update_status(f"Device detected: {device}")
             self._switch_to_transfer_mode()
             self.enable_controls()
 
     def browse_remote_folder(self):
         """Browse remote Android folders."""
-        if get_platform_type().startswith("linux") and self.mtp_manager:
-            # Use Linux MTP browser
-            self.linux_browser.show_browser()
-        else:
-            # Use Windows ADB browser
-            self.windows_browser.show_browser()
+        self.browser.show_browser()
 
     def browse_local_folder(self):
         """Browse for local folder."""
@@ -239,6 +259,12 @@ class AndroidFileHandlerGUI(tk.Tk):
             text="Start Transfer", command=self.start_transfer, state="normal"
         )
 
+    def _switch_to_cancel_mode(self):
+        """Switch button to cancel transfer mode."""
+        self.start_btn.config(
+            text="Cancel Transfer", command=self.cancel_transfer, state="normal"
+        )
+
     def handle_button_click(self):
         """Handle button click - delegates to appropriate method based on device state."""
         if self.device_connected:
@@ -258,6 +284,36 @@ class AndroidFileHandlerGUI(tk.Tk):
     def _perform_device_recheck(self):
         """Perform the actual device recheck."""
         self.check_device_connection()
+
+    def cancel_transfer(self):
+        """Cancel the current transfer."""
+        print("[DEBUG] Cancel transfer requested")
+        
+        # Cancel the actual ADB process
+        cancelled = self.adb_manager.cancel_transfer()
+        
+        # Increment transfer ID to invalidate current transfer
+        self.current_transfer_id += 1
+        
+        # Stop animation and restore UI
+        self._stop_transfer_animation()
+        
+        # Use after() to ensure status update happens after animation stops
+        def update_cancelled_status():
+            if cancelled:
+                self.status_label.config(text="Transfer cancelled by user.")
+            else:
+                self.status_label.config(text="Transfer cancellation failed.")
+            self.update_idletasks()
+        
+        self.after(0, update_cancelled_status)
+        self.enable_controls()
+        
+        # Restore proper button state
+        if self.device_connected:
+            self._switch_to_transfer_mode()
+        else:
+            self._switch_to_recheck_mode()
 
     def show_enable_debugging_instructions(self):
         """Show instructions to connect device, enable file transfer, and to enable USB debugging."""
@@ -355,21 +411,18 @@ class AndroidFileHandlerGUI(tk.Tk):
         transfer_id = self.current_transfer_id
 
         self.disable_controls()
-        self.start_btn.config(
-            state="disabled"
-        )  # Disable transfer button during transfer
-        # Reset progress bar in thread-safe way
-        self.progress_handler.reset_progress()
+        # Switch button to cancel mode during transfer
+        self._switch_to_cancel_mode()
+        # Start the transfer animation
+        self._start_transfer_animation()
 
         if direction == "pull":
-            self.progress_handler.set_status("Starting pull transfer...")
             threading.Thread(
                 target=self._pull_thread,
                 args=(remote_path, local_path, transfer_id),
                 daemon=True,
             ).start()
         elif direction == "push":
-            self.progress_handler.set_status("Starting push transfer...")
             threading.Thread(
                 target=self._push_thread,
                 args=(local_path, remote_path, transfer_id),
@@ -388,12 +441,16 @@ class AndroidFileHandlerGUI(tk.Tk):
 
             success = self.adb_manager.pull_folder(remote_path, local_path)
             if success and self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
+                self._update_status("Transfer completed successfully.")
                 self.show_disable_debugging_reminder()
         except Exception as e:
             if self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
                 self.report_error(f"Pull operation failed: {e}")
         finally:
             if self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
                 self.enable_controls()
                 # Restore proper button state after transfer
                 self.after(0, self._restore_button_state)
@@ -407,12 +464,16 @@ class AndroidFileHandlerGUI(tk.Tk):
 
             success = self.adb_manager.push_folder(local_path, remote_path)
             if success and self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
+                self._update_status("Transfer completed successfully.")
                 self.show_disable_debugging_reminder()
         except Exception as e:
             if self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
                 self.report_error(f"Push operation failed: {e}")
         finally:
             if self.current_transfer_id == transfer_id:
+                self._stop_transfer_animation()
                 self.enable_controls()
                 # Restore proper button state after transfer
                 self.after(0, self._restore_button_state)

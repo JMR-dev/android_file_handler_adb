@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 
-class WindowsAndroidBrowser:
+class AndroidFileBrowser:
     """Android filesystem browser for Windows using ADB."""
 
     def __init__(self, parent_window, adb_manager, remote_path_var):

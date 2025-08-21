@@ -44,6 +44,7 @@ class ADBManager:
     def __init__(self):
         self.progress_callback: Optional[Callable[[int], None]] = None
         self.status_callback: Optional[Callable[[str], None]] = None
+        self.current_process: Optional[subprocess.Popen] = None
 
     def set_progress_callback(self, callback: Callable[[int], None]):
         """Set callback function for progress updates."""
@@ -217,6 +218,7 @@ class ADBManager:
                 text=True,
                 bufsize=1,
             )
+            self.current_process = proc
 
             line_count = 0
             last_progress = 0
@@ -280,6 +282,7 @@ class ADBManager:
             if proc.returncode == 0:
                 self._update_progress(100)
                 self._update_status("Transfer completed successfully.")
+                self.current_process = None
                 return True
             else:
                 # Capture error output for better debugging
@@ -292,10 +295,12 @@ class ADBManager:
                     except:
                         pass
                 self._update_status(error_msg)
+                self.current_process = None
                 return False
 
         except Exception as e:
             self._update_status(f"Transfer error: {e}")
+            self.current_process = None
             return False
 
     def push_folder(self, local_path: str, remote_path: str) -> bool:
@@ -333,6 +338,7 @@ class ADBManager:
                 text=True,
                 bufsize=1,
             )
+            self.current_process = proc
         except Exception as e:
             self._update_status(f"Failed to start adb: {e}")
             return False
@@ -399,6 +405,7 @@ class ADBManager:
         if proc.returncode == 0:
             self._update_progress(100)
             self._update_status("Transfer completed successfully.")
+            self.current_process = None
             return True
         else:
             # Capture error output for better debugging
@@ -411,7 +418,30 @@ class ADBManager:
                 except:
                     pass
             self._update_status(error_msg)
+            self.current_process = None
             return False
+
+    def cancel_transfer(self) -> bool:
+        """Cancel the current transfer operation."""
+        if self.current_process is not None:
+            try:
+                # Terminate the process
+                self.current_process.terminate()
+                # Give it a moment to terminate gracefully
+                try:
+                    self.current_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't terminate gracefully
+                    self.current_process.kill()
+                    self.current_process.wait()
+                
+                self.current_process = None
+                self._update_status("Transfer cancelled by user")
+                return True
+            except Exception as e:
+                self._update_status(f"Error cancelling transfer: {e}")
+                return False
+        return False
 
 
 class LinuxMTPManager:
