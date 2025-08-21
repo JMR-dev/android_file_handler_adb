@@ -27,3 +27,7 @@ This is a small Python GUI tool for managing Android device files via ADB (Andro
 ## UI guidelines
 
 - Application should have a modern and clean design.
+
+## Runtime Instructions
+- Always run Python commands through Poetry to ensure the correct environment is used.
+- Use `poetry run python src/main.py` to start the application.

@@ -14,16 +14,12 @@ try:
     # Try relative import first (when used as module)
     from .adb_manager import (
         ADBManager,
-        LinuxMTPManager,
-        get_platform_type,
         is_adb_available,
     )
 except ImportError:
     # Fall back to direct import (when run directly)
     from adb_manager import (
         ADBManager,
-        LinuxMTPManager,
-        get_platform_type,
         is_adb_available,
     )
 
@@ -36,25 +32,25 @@ class AndroidFileHandlerGUI(tk.Tk):
 
         # Initialize business logic
         self.adb_manager = ADBManager()
-        self.adb_manager.set_progress_callback(self.update_progress)
-        self.adb_manager.set_status_callback(self.set_status)
 
         # Transfer tracking for thread safety
         self.current_transfer_id = 0
 
-        if get_platform_type().startswith("linux"):
-            self.mtp_manager = LinuxMTPManager()
-        else:
-            self.mtp_manager = None
-
         # Setup UI
         self._setup_ui()
+        self._setup_progress_handling()
         self._initialize_app()
+
+    def _setup_progress_handling(self):
+        """Set up progress handling callbacks."""
+        # Set up ADB callbacks using our own methods for this legacy version
+        self.adb_manager.set_progress_callback(self.update_progress)
+        self.adb_manager.set_status_callback(self.set_status)
 
     def _setup_ui(self):
         """Setup the user interface."""
         # Window configuration
-        self.title("Android Folder Puller")
+        self.title("Android File Handler")
         self.geometry("520x320")
         self.minsize(520, 320)
         self.resizable(True, True)
@@ -109,7 +105,7 @@ class AndroidFileHandlerGUI(tk.Tk):
         ).pack(side="right", padx=(5, 0))
 
         # Progress bar
-        self.progress = ttk.Progressbar(self, orient="horizontal", mode="determinate")
+        self.progress = ttk.Progressbar(self, orient="horizontal", mode="indeterminate")
         self.progress.pack(fill="x", padx=10, pady=(20, 5))
 
         # Status label
@@ -158,54 +154,11 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.set_status(f"Device detected: {device}")
 
     def browse_remote_folder(self):
-        """Browse remote Android folders via MTP (Linux)"""
-        # For Linux - use MTP browsing
-        if get_platform_type().startswith("linux") and self.mtp_manager:
-            # First try using existing GVFS mount
-            gvfs_mount = self.mtp_manager.find_gvfs_mtp_mount()
-            if gvfs_mount:
-                try:
-                    folder = filedialog.askdirectory(
-                        initialdir=gvfs_mount, title="Select Android folder"
-                    )
-                    if folder:
-                        # Convert filesystem path back to Android path
-                        relative_path = os.path.relpath(folder, gvfs_mount)
-                        if relative_path == ".":
-                            android_path = "/sdcard"
-                        else:
-                            android_path = f"/sdcard/{relative_path}".replace("\\", "/")
-                        self.remote_path_var.set(android_path)
-                    return
-                except Exception as e:
-                    print(f"GVFS browse failed: {e}")
-
-            # Fallback to jmtpfs
-            mount_point = self.mtp_manager.mount_mtp_device()
-            if mount_point:
-                try:
-                    folder = filedialog.askdirectory(
-                        initialdir=mount_point, title="Select Android folder"
-                    )
-                    if folder:
-                        # Convert filesystem path back to Android path
-                        relative_path = os.path.relpath(folder, mount_point)
-                        if relative_path == ".":
-                            android_path = "/sdcard"
-                        else:
-                            android_path = f"/sdcard/{relative_path}".replace("\\", "/")
-                        self.remote_path_var.set(android_path)
-                finally:
-                    self.mtp_manager.unmount_mtp_device()
-            else:
-                messagebox.showerror(
-                    "Error",
-                    "Could not mount Android device via MTP. "
-                    "Make sure it's connected and set to 'File Transfer' mode.",
-                )
-        else:
-            # For Windows - show common Android paths dialog
-            self._show_android_filesystem_tree()
+        """Browse remote Android folders."""
+        messagebox.showinfo(
+            "Feature Not Available", 
+            "Remote folder browsing is not available in this version. Please manually enter the path."
+        )
 
     def _show_android_filesystem_tree(self):
         """Show a browsable Android folder tree for Windows users."""
@@ -717,8 +670,15 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def _update_progress_ui(self, percentage: int):
         """Internal method to update progress bar on main thread."""
-        self.progress["value"] = percentage
-        self.update_idletasks()
+        # For indeterminate mode, start/stop animation based on progress
+        try:
+            if percentage > 0 and percentage < 100:
+                self.progress.start(10)  # Start animation
+            elif percentage >= 100:
+                self.progress.stop()  # Stop animation when complete
+            self.update_idletasks()
+        except Exception as e:
+            print(f"[DEBUG] Error updating progress bar: {e}")
 
     def set_status(self, message: str):
         """Update the status label (thread-safe)."""
