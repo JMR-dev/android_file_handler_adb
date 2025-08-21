@@ -29,14 +29,14 @@ class AndroidFileBrowser:
 
         # Create browsable folder dialog
         browser_window = tk.Toplevel(self.parent)
-        browser_window.title("Browse Android Folders")
+        browser_window.title("Browse Android Files and Folders")
         browser_window.geometry("500x400")
         browser_window.transient(self.parent)
         browser_window.grab_set()
 
         tk.Label(
             browser_window,
-            text="Browse Android device folders:",
+            text="Browse Android device files and folders:",
             font=("Arial", 10, "bold"),
         ).pack(pady=10)
 
@@ -136,12 +136,13 @@ class AndroidFileBrowser:
                             )
                             return
 
-                        # Parse ls -la output to find directories
+                        # Parse ls -la output to find directories and files
                         folders = []
+                        files = []
                         lines = stdout.strip().split("\n")
                         for line in lines:
                             if line.startswith("d"):
-                                # Extract folder name - improved parsing to prevent truncation
+                                # Directory entry
                                 parts = line.split()
                                 if len(parts) >= 8:
                                     # Method 1: Use regex to find time pattern and extract name after it
@@ -173,23 +174,67 @@ class AndroidFileBrowser:
                                         and not folder_name.startswith(".")
                                     ):
                                         folders.append(folder_name)
+                            elif line.startswith("-"):
+                                # Regular file entry
+                                parts = line.split()
+                                if len(parts) >= 8:
+                                    # Extract file name using same method as folders
+                                    import re
 
-                        # Add folders to tree
+                                    time_pattern = r"\d{1,2}:\d{2}"
+                                    time_matches = list(re.finditer(time_pattern, line))
+
+                                    if time_matches:
+                                        # Take everything after the last time pattern
+                                        last_time_match = time_matches[-1]
+                                        file_name = line[
+                                            last_time_match.end() :
+                                        ].strip()
+                                    else:
+                                        # Fallback: join from part 8 (skip date/time fields)
+                                        file_name = (
+                                            " ".join(parts[8:])
+                                            if len(parts) > 8
+                                            else parts[7]
+                                        )
+
+                                    # Additional validation and cleanup
+                                    file_name = file_name.strip()
+
+                                    if (
+                                        file_name
+                                        and not file_name.startswith(".")
+                                    ):
+                                        files.append(file_name)
+
+                        # Add folders to tree first (sorted)
                         if folders:
                             for folder in sorted(folders):
                                 folder_path = f"{path.rstrip('/')}/{folder}"
                                 item = tree.insert(
                                     parent_item,
                                     "end",
-                                    text=folder,
-                                    values=[folder_path],
+                                    text=f"📁 {folder}",
+                                    values=[folder_path, "folder"],
                                 )
                                 # Add a dummy child to make it expandable
                                 tree.insert(item, "end", text="Loading...")
-                        else:
-                            # No folders found, show indicator
+                        
+                        # Add files to tree (sorted)
+                        if files:
+                            for file in sorted(files):
+                                file_path = f"{path.rstrip('/')}/{file}"
+                                tree.insert(
+                                    parent_item,
+                                    "end",
+                                    text=f"📄 {file}",
+                                    values=[file_path, "file"],
+                                )
+                        
+                        # If no folders or files found, show indicator
+                        if not folders and not files:
                             tree.insert(
-                                parent_item, "end", text="(No Folders)", values=[""]
+                                parent_item, "end", text="(Empty Directory)", values=["", ""]
                             )
 
                     self.parent.after(0, update_tree)
@@ -395,17 +440,37 @@ class AndroidFileBrowser:
         button_frame = tk.Frame(browser_window)
         button_frame.pack(pady=10)
 
-        def select_current_folder():
-            """Select the currently highlighted folder."""
+        def select_current_item():
+            """Intelligently select the currently highlighted item (file or folder)."""
+            selected_item = tree.selection()[0] if tree.selection() else None
+            
+            if selected_item:
+                # Get the item type and path from values
+                item_values = tree.item(selected_item, "values")
+                if len(item_values) >= 1:
+                    item_path = item_values[0]
+                    # Check if it's a file or folder (if we have type info)
+                    if len(item_values) >= 2 and item_values[1] == "file":
+                        # It's a file - select the file path directly
+                        self.remote_path_var.set(item_path)
+                        browser_window.destroy()
+                        return
+                    elif len(item_values) >= 2 and item_values[1] == "folder":
+                        # It's a folder - select the folder path directly
+                        self.remote_path_var.set(item_path)
+                        browser_window.destroy()
+                        return
+            
+            # Fallback: use current path (for backwards compatibility or when no specific item is selected)
             current_path = current_path_var.get()
             if current_path and current_path.strip():
                 self.remote_path_var.set(current_path)
                 browser_window.destroy()
             else:
-                messagebox.showwarning("No Selection", "Please select a valid folder.")
+                messagebox.showwarning("No Selection", "Please select a file or folder.")
 
         tk.Button(
-            button_frame, text="Select This Folder", command=select_current_folder
+            button_frame, text="Select", command=select_current_item
         ).pack(side="left", padx=5)
         tk.Button(button_frame, text="Cancel", command=browser_window.destroy).pack(
             side="left", padx=5
