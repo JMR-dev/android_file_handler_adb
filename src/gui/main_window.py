@@ -108,9 +108,10 @@ class AndroidFileHandlerGUI(tk.Tk):
             anchor="w"
         )
         self.remote_path_display.pack(side="left", fill="x", expand=True)
-        tk.Button(
+        self.remote_browse_btn = tk.Button(
             android_path_frame, text="Browse...", command=self.browse_remote_folder
-        ).pack(side="right", padx=(5, 0))
+        )
+        self.remote_browse_btn.pack(side="right", padx=(5, 0))
 
         # Create the Computer path section
         self.computer_frame = tk.Frame(self.path_container)
@@ -126,9 +127,10 @@ class AndroidFileHandlerGUI(tk.Tk):
             anchor="w"
         )
         self.local_path_display.pack(side="left", fill="x", expand=True)
-        tk.Button(
+        self.local_browse_btn = tk.Button(
             computer_path_frame, text="Browse...", command=self.browse_local_folder
-        ).pack(side="right", padx=(5, 0))
+        )
+        self.local_browse_btn.pack(side="right", padx=(5, 0))
 
         # Initially arrange for pull (Android on top)
         self._arrange_path_sections()
@@ -142,6 +144,9 @@ class AndroidFileHandlerGUI(tk.Tk):
             self, text="Start Transfer", command=self.handle_button_click, state="disabled"
         )
         self.start_btn.pack(pady=10)
+
+        # Initially disable browse buttons until device is connected
+        self._disable_browse_buttons()
 
         # Window close protocol
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -202,6 +207,16 @@ class AndroidFileHandlerGUI(tk.Tk):
         if self.start_btn.cget("text") == "Start Transfer":
             self.start_btn.config(state="disabled")
 
+    def _enable_browse_buttons(self):
+        """Enable both browse buttons when device is connected."""
+        self.remote_browse_btn.config(state="normal")
+        self.local_browse_btn.config(state="normal")
+
+    def _disable_browse_buttons(self):
+        """Disable both browse buttons when no device is detected."""
+        self.remote_browse_btn.config(state="disabled")
+        self.local_browse_btn.config(state="disabled")
+
     def _start_transfer_animation(self):
         """Start the 'Transferring...' animation."""
         print("[DEBUG] Starting transfer animation")
@@ -259,6 +274,7 @@ class AndroidFileHandlerGUI(tk.Tk):
         if not device:
             self.device_connected = False
             self.disable_controls()
+            self._disable_browse_buttons()
             self._update_status(
                 "No device detected. Enable USB debugging and connect your device."
             )
@@ -266,6 +282,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             self.show_enable_debugging_instructions()
         else:
             self.device_connected = True
+            self._enable_browse_buttons()
             self._update_status(f"Device detected: {device}")
             self._switch_to_transfer_mode()
             self.enable_controls()
