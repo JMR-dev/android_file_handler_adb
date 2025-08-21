@@ -16,8 +16,12 @@ class AndroidFileBrowser:
         self.adb_manager = adb_manager
         self.remote_path_var = remote_path_var
 
-    def show_browser(self):
-        """Show a browsable Android folder tree for Windows users."""
+    def show_browser(self, direction="pull"):
+        """Show a browsable Android folder tree. 
+        
+        Args:
+            direction: "pull" to show files and folders, "push" to show folders only
+        """
         # Check if device is connected
         device = self.adb_manager.check_device()
         if not device:
@@ -29,14 +33,20 @@ class AndroidFileBrowser:
 
         # Create browsable folder dialog
         browser_window = tk.Toplevel(self.parent)
-        browser_window.title("Browse Android Files and Folders")
+        if direction == "push":
+            browser_window.title("Browse Android Folders (Destination)")
+            label_text = "Browse Android device folders (select destination):"
+        else:
+            browser_window.title("Browse Android Files and Folders")
+            label_text = "Browse Android device files and folders:"
+        
         browser_window.geometry("500x400")
         browser_window.transient(self.parent)
         browser_window.grab_set()
 
         tk.Label(
             browser_window,
-            text="Browse Android device files and folders:",
+            text=label_text,
             font=("Arial", 10, "bold"),
         ).pack(pady=10)
 
@@ -174,8 +184,8 @@ class AndroidFileBrowser:
                                         and not folder_name.startswith(".")
                                     ):
                                         folders.append(folder_name)
-                            elif line.startswith("-"):
-                                # Regular file entry
+                            elif line.startswith("-") and direction != "push":
+                                # Regular file entry - only show files if not in push mode
                                 parts = line.split()
                                 if len(parts) >= 8:
                                     # Extract file name using same method as folders
@@ -220,8 +230,8 @@ class AndroidFileBrowser:
                                 # Add a dummy child to make it expandable
                                 tree.insert(item, "end", text="Loading...")
                         
-                        # Add files to tree (sorted)
-                        if files:
+                        # Add files to tree (sorted) - only if not in push mode
+                        if files and direction != "push":
                             for file in sorted(files):
                                 file_path = f"{path.rstrip('/')}/{file}"
                                 tree.insert(
@@ -232,9 +242,10 @@ class AndroidFileBrowser:
                                 )
                         
                         # If no folders or files found, show indicator
-                        if not folders and not files:
+                        if not folders and (not files or direction == "push"):
+                            empty_text = "(No Folders)" if direction == "push" else "(Empty Directory)"
                             tree.insert(
-                                parent_item, "end", text="(Empty Directory)", values=["", ""]
+                                parent_item, "end", text=empty_text, values=["", ""]
                             )
 
                     self.parent.after(0, update_tree)
@@ -451,10 +462,15 @@ class AndroidFileBrowser:
                     item_path = item_values[0]
                     # Check if it's a file or folder (if we have type info)
                     if len(item_values) >= 2 and item_values[1] == "file":
-                        # It's a file - select the file path directly
-                        self.remote_path_var.set(item_path)
-                        browser_window.destroy()
-                        return
+                        if direction == "push":
+                            # In push mode, don't allow file selection
+                            messagebox.showwarning("Invalid Selection", "Please select a folder as the destination.")
+                            return
+                        else:
+                            # It's a file and we're in pull mode - select the file path directly
+                            self.remote_path_var.set(item_path)
+                            browser_window.destroy()
+                            return
                     elif len(item_values) >= 2 and item_values[1] == "folder":
                         # It's a folder - select the folder path directly
                         self.remote_path_var.set(item_path)
@@ -467,7 +483,8 @@ class AndroidFileBrowser:
                 self.remote_path_var.set(current_path)
                 browser_window.destroy()
             else:
-                messagebox.showwarning("No Selection", "Please select a file or folder.")
+                selection_type = "folder" if direction == "push" else "file or folder"
+                messagebox.showwarning("No Selection", f"Please select a {selection_type}.")
 
         tk.Button(
             button_frame, text="Select", command=select_current_item

@@ -101,11 +101,13 @@ class AndroidFileHandlerGUI(tk.Tk):
         
         android_path_frame = tk.Frame(self.android_frame)
         android_path_frame.pack(fill="x", pady=(0, 10))
-        self.remote_path_var = tk.StringVar()
-        self.remote_path_entry = tk.Entry(
-            android_path_frame, textvariable=self.remote_path_var, width=50
+        self.remote_path_var = tk.StringVar(value="Please select file or folder ->")
+        self.remote_path_display = tk.Label(
+            android_path_frame, 
+            textvariable=self.remote_path_var, 
+            anchor="w"
         )
-        self.remote_path_entry.pack(side="left", fill="x", expand=True)
+        self.remote_path_display.pack(side="left", fill="x", expand=True)
         tk.Button(
             android_path_frame, text="Browse...", command=self.browse_remote_folder
         ).pack(side="right", padx=(5, 0))
@@ -117,11 +119,13 @@ class AndroidFileHandlerGUI(tk.Tk):
         
         computer_path_frame = tk.Frame(self.computer_frame)
         computer_path_frame.pack(fill="x", pady=(0, 10))
-        self.local_path_var = tk.StringVar()
-        self.local_path_entry = tk.Entry(
-            computer_path_frame, textvariable=self.local_path_var, width=50
+        self.local_path_var = tk.StringVar(value="Please select file or folder ->")
+        self.local_path_display = tk.Label(
+            computer_path_frame, 
+            textvariable=self.local_path_var, 
+            anchor="w"
         )
-        self.local_path_entry.pack(side="left", fill="x", expand=True)
+        self.local_path_display.pack(side="left", fill="x", expand=True)
         tk.Button(
             computer_path_frame, text="Browse...", command=self.browse_local_folder
         ).pack(side="right", padx=(5, 0))
@@ -244,51 +248,56 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def browse_remote_folder(self):
         """Browse remote Android files and folders."""
-        self.browser.show_browser()
+        # Pass the current direction to the browser
+        direction = self.direction_var.get()
+        self.browser.show_browser(direction)
 
     def browse_local_folder(self):
         """Browse for local folder or file based on direction."""
+        import tkinter.filedialog as fd
+        import os
+        
         direction = self.direction_var.get()
         
+        # Set initial directory to user's home directory
+        initial_dir = os.path.expanduser("~")
+        
         if direction == "push":
-            # For push, show a unified dialog that handles both files and folders
-            # Start with file selection dialog that has "Open" and "Cancel"
-            # If user selects a file, use it. If they navigate and click "Cancel" on file dialog,
-            # we'll assume they want to select the current folder
+            # For push, show file selection first, then folder selection if cancelled
             
-            import tkinter.filedialog as fd
-            import os
-            
-            # Use askopenfilename but allow folder selection by providing both options
             # First try file selection
             selected_path = fd.askopenfilename(
-                title="Select file to push (or Cancel and then select folder)",
+                title="Select file to push to Android device",
+                initialdir=initial_dir,
                 filetypes=[("All files", "*.*")]
             )
             
-            # If no file was selected, offer folder selection
+            # If no file was selected, offer folder selection as an alternative
             if not selected_path:
                 selected_path = fd.askdirectory(
-                    title="Select folder to push to Android device"
+                    title="Select folder to push to Android device",
+                    initialdir=initial_dir
                 )
             
-            # Set the path if something was selected
+            # Only set the path if something was actually selected
+            # If user cancels both dialogs, selected_path will be empty and nothing happens
             if selected_path:
                 self.local_path_var.set(selected_path)
                 
         else:  # pull direction
             # For pull, only allow folder selection (destination)
             folder = filedialog.askdirectory(
-                title="Select destination folder for pulled files"
+                title="Select destination folder for pulled files",
+                initialdir=initial_dir
             )
             if folder:
                 self.local_path_var.set(folder)
 
     def disable_controls(self):
         """Disable UI controls during operations."""
-        self.remote_path_entry.config(state="disabled")
-        self.local_path_entry.config(state="disabled")
+        # Path displays are already read-only (Labels), no need to disable them
         # Don't disable start_btn here - it will be handled by button mode switching
+        pass
 
     def enable_controls(self):
         """Enable UI controls after operations (thread-safe)."""
@@ -297,9 +306,9 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def _enable_controls_ui(self):
         """Internal method to enable controls on main thread."""
-        self.remote_path_entry.config(state="normal")
-        self.local_path_entry.config(state="normal")
+        # Path displays are already read-only (Labels), no need to enable them
         # Button state is handled by mode switching methods
+        pass
 
     def _on_direction_change(self):
         """Handle radio button direction change."""
