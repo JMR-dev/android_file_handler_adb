@@ -25,136 +25,136 @@ fi
 
 mkdir build_temp
 cd build_temp || exit 1
-curl -L -o python3.12.7-cp312-cp312-linux_x86_64.AppImage https://github.com/niess/python-appimage/releases/download/python3.12/python3.12.7-cp312-cp312-linux_x86_64.AppImage
-chmod +x python3.12.7-cp312-cp312-linux_x86_64.AppImage
 
-# 1. Extract Python AppImage first
-./python3.12.7-cp312-cp312-linux_x86_64.AppImage --appimage-extract
+# Download portable Python 3.12
+echo "Downloading portable Python 3.12..."
+PYTHON_VERSION="3.12.5"
+PYTHON_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz"
 
-# 2. Create AppDir structure
-mkdir -p AppDir/usr/bin AppDir/usr/share/{applications,icons/hicolor/256x256/apps}
-mkdir -p AppDir/usr/lib/python3.12/site-packages
-
-# 3. Copy Python runtime to AppDir first
-if [ -d "squashfs-root/usr" ]; then
-    cp -r squashfs-root/usr/* AppDir/usr/ 2>/dev/null || echo "Failed to copy Python runtime"
-else
-    echo "Error: Python AppImage extraction failed"
+if ! curl -L "$PYTHON_URL" -o "python-${PYTHON_VERSION}.tgz"; then
+    echo "Error: Failed to download Python source"
     exit 1
 fi
 
-# Alternative copy method if the first failed
-if [ ! -f "AppDir/usr/bin/python3" ] && [ ! -f "AppDir/usr/bin/python" ]; then
-    # Try copying from different possible locations
-    if [ -d "squashfs-root/opt/python3.12" ]; then
-        mkdir -p AppDir/opt/
-        cp -r squashfs-root/opt/* AppDir/opt/ 2>/dev/null || true
-    fi
-    
-    # Try to find and copy any Python executable
-    find squashfs-root/ -name "python*" -type f -executable 2>/dev/null | while read python_file; do
-        target_dir="AppDir/usr/bin"
-        mkdir -p "$target_dir"
-        cp "$python_file" "$target_dir/" 2>/dev/null || true
-    done
-    
-    # If still no Python, try using system Python as fallback
-    if [ ! -f "AppDir/usr/bin/python3" ] && [ ! -f "AppDir/usr/bin/python" ]; then
-        which python3.12 >/dev/null && cp "$(which python3.12)" AppDir/usr/bin/python3
-        which python3 >/dev/null && cp "$(which python3)" AppDir/usr/bin/python3
-    fi
+# For simplicity, let's use a pre-built Python binary instead
+echo "Downloading pre-built Python 3.12 for Linux..."
+if ! curl -L "https://github.com/indygreg/python-build-standalone/releases/download/20240713/cpython-3.12.4+20240713-x86_64-unknown-linux-gnu-install_only.tar.gz" -o "python-standalone.tar.gz"; then
+    echo "Error: Failed to download Python standalone"
+    exit 1
 fi
 
-# 4. Go back to project root and install dependencies using system poetry
+# Extract Python
+echo "Extracting Python..."
+tar -xzf python-standalone.tar.gz
+
+# Rename the extracted directory for consistency
+if [ -d "python" ]; then
+    mv python python3.12
+fi
+
+# Check if extraction was successful
+if [ ! -d "python3.12" ]; then
+    echo "Error: Python extraction failed"
+    exit 1
+fi
+
+# 2. Create AppDir structure
+mkdir -p AppDir/opt/python3.12
+mkdir -p AppDir/usr/share/{applications,icons/hicolor/256x256/apps}
+mkdir -p AppDir/opt/android-file-handler
+
+# 3. Copy Python runtime to AppDir
+echo "Copying Python runtime..."
+if [ -d "python3.12" ]; then
+    cp -r python3.12/* AppDir/opt/python3.12/ 2>/dev/null || echo "Failed to copy Python runtime"
+else
+    echo "Error: Python directory not found"
+    exit 1
+fi
+
+# Make sure Python binary is executable
+chmod +x AppDir/opt/python3.12/bin/python3* 2>/dev/null || true
+
+# 4. Install dependencies using the portable Python
+echo "Installing dependencies..."
 cd ..
-poetry lock  # Update lock file if needed
-poetry install --no-dev
 
-# 4.5. Ensure essential packages are available by installing them directly
 cd build_temp
+echo "Installing packages..."
+# Install specific packages we need directly
+AppDir/opt/python3.12/bin/python3.12 -m pip install requests urllib3 certifi charset-normalizer idna --target AppDir/opt/python3.12/lib/python3.12/site-packages/ --no-deps --force-reinstall
 
-# Install essential packages using system python
-python3 -m pip install requests --target AppDir/usr/lib/python3.12/site-packages/ --no-deps --quiet 2>/dev/null || true
+# 5. Copy application source
+echo "Copying application source..."
+cp -r ../src/* AppDir/opt/android-file-handler/
 
-# Install project dependencies
-python3 -c "
-import subprocess
+# Create a launcher script to handle XCB issues
+cat > AppDir/opt/android-file-handler/launcher.py << 'EOF'
+#!/usr/bin/env python3
+"""
+Launcher script to handle threading and import issues in AppImage
+"""
+import os
 import sys
-packages = ['requests', 'urllib3', 'certifi', 'charset-normalizer', 'idna']
-for pkg in packages:
-    subprocess.run([sys.executable, '-m', 'pip', 'install', pkg, '--target', 'AppDir/usr/lib/python3.12/site-packages/', '--quiet'], check=False)
-"
+import threading
 
-cd ..
+# Critical: Set single-threaded mode BEFORE any imports
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
 
-# 5. Copy application source to a separate app directory
-mkdir -p build_temp/AppDir/opt/android-file-handler
-cp -r src/ build_temp/AppDir/opt/android-file-handler/
+# XCB environment fixes
+os.environ['QT_X11_NO_MITSHM'] = '1'
+os.environ['_X11_NO_MITSHM'] = '1'
+os.environ['_MITSHM'] = '0'
+os.environ['LIBXCB_ALLOW_SLOPPY_LOCK'] = '1'
+os.environ['TK_SILENCE_DEPRECATION'] = '1'
 
-# 6. Also copy platform-tools if it exists
-if [ -d "src/platform-tools" ]; then
-    cp -r src/platform-tools/ build_temp/AppDir/opt/android-file-handler/
-fi
+def main():
+    """Main launcher function with proper thread handling"""
+    try:
+        # Force single-threaded mode
+        threading.current_thread().name = "MainThread"
+        
+        # Add the application directory to Python path
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        if app_dir not in sys.path:
+            sys.path.insert(0, app_dir)
+        
+        # Also ensure packages directory is in path
+        packages_dir = os.path.join(os.path.dirname(app_dir), 'python3.12', 'lib', 'python3.12', 'site-packages')
+        if os.path.exists(packages_dir) and packages_dir not in sys.path:
+            sys.path.insert(0, packages_dir)
+        
+        # Import tkinter early and set up single-threaded mode
+        import tkinter as tk
+        
+        # Allow default root but ensure single-threaded operation
+        # Don't call NoDefaultRoot() - let the app create its own root
+        
+        try:
+            # Import the main application
+            import main
+            main.main()
+            
+        except ImportError:
+            try:
+                # Fallback import path
+                from gui.main_window import main as app_main
+                app_main()
+            except Exception as e:
+                print(f"Failed to import application: {e}")
+                sys.exit(1)
+                
+    except Exception as e:
+        print(f"Application startup error: {e}")
+        sys.exit(1)
 
-# 7. Copy installed packages to AppDir
-# Find where Poetry actually installed packages
-VENV_PATH=$(poetry env info --path)
+if __name__ == "__main__":
+    main()
+EOF
 
-if [ -d "$VENV_PATH/lib" ]; then
-    # Find the actual site-packages directory
-    SITE_PACKAGES=$(find "$VENV_PATH/lib" -name "site-packages" -type d | head -1)
-    if [ -d "$SITE_PACKAGES" ]; then
-        cp -r "$SITE_PACKAGES"/* build_temp/AppDir/usr/lib/python3.12/site-packages/ 2>/dev/null || true
-    fi
-fi
-
-# Fallback to .venv directory
-if [ -d ".venv/lib/python3.12/site-packages" ]; then
-    cp -r .venv/lib/python3.12/site-packages/* build_temp/AppDir/usr/lib/python3.12/site-packages/ 2>/dev/null || true
-else
-    # Try to find site-packages for any Python version
-    for py_dir in .venv/lib/python*/site-packages; do
-        if [ -d "$py_dir" ]; then
-            cp -r "$py_dir"/* build_temp/AppDir/usr/lib/python3.12/site-packages/ 2>/dev/null || true
-            break
-        fi
-    done
-    
-    if [ ! -d "build_temp/AppDir/usr/lib/python3.12/site-packages/requests" ]; then
-        # Alternative: Use poetry to install directly into the AppImage
-        poetry export -f requirements.txt --output requirements.txt --without-hashes
-        if [ -f requirements.txt ]; then
-            # Use the AppImage Python to install packages directly
-            cd build_temp
-            ../squashfs-root/usr/bin/python3 -m pip install -r ../requirements.txt --target AppDir/usr/lib/python3.12/site-packages/ 2>/dev/null || true
-            cd ..
-        fi
-    fi
-fi
-
-# Verify critical packages are present
-if [ -d "build_temp/AppDir/usr/lib/python3.12/site-packages/requests" ]; then
-    true  # requests package found
-else
-    # Install requests as last resort
-    cd build_temp
-    curl -s https://files.pythonhosted.org/packages/9d/be/10918a2eac4ae9f02f6cfe6414b7a155ccd8f7f9d4380d62fd5b955065c3/requests-2.31.0-py3-none-any.whl -o requests.whl
-    unzip -q requests.whl -d AppDir/usr/lib/python3.12/site-packages/ 2>/dev/null || true
-    rm -f requests.whl
-    cd ..
-fi
-
-# 7. Go back to build directory
-cd build_temp
-
-# 8. Install requests package directly into site-packages using pip
-# Ensure requests package is available (critical for our app)
-pip install --target="build_temp/AppDir/usr/lib/python3.12/site-packages" requests urllib3 2>/dev/null || true
-
-# Ensure Python executables have correct permissions
-find AppDir/usr/bin/ -name "python*" -type f -exec chmod +x {} \; 2>/dev/null || true
-
-# 9. Create .desktop file
+# 6. Create .desktop file
 cat > AppDir/android-file-handler.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
@@ -163,6 +163,59 @@ Exec=AppRun
 Icon=android-file-handler
 Categories=Utility;
 EOF
+
+# 7. Create AppRun script
+cat > AppDir/AppRun << 'EOF'
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "${0}")")"
+export APPDIR="$HERE"
+
+# Force single-threaded execution
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# Set up Python paths
+export PYTHONPATH="$HERE/opt/python3.12/lib/python3.12/site-packages:$HERE/opt/android-file-handler:$PYTHONPATH"
+export PATH="$HERE/opt/python3.12/bin:$PATH"
+
+# Python runtime settings
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONUNBUFFERED=1
+
+# XCB and GUI fixes
+export QT_X11_NO_MITSHM=1
+export _X11_NO_MITSHM=1
+export _MITSHM=0
+export LIBXCB_ALLOW_SLOPPY_LOCK=1
+export TK_SILENCE_DEPRECATION=1
+
+# Additional GUI stability settings
+export GDK_BACKEND=x11
+export XDG_SESSION_TYPE=x11
+
+# Disable CI mode to prevent threading issues
+export CI_MODE=false
+
+# Find Python executable
+PYTHON="$HERE/opt/python3.12/bin/python3.12"
+if [ ! -f "$PYTHON" ]; then
+    PYTHON="$HERE/opt/python3.12/bin/python3"
+fi
+
+if [ ! -f "$PYTHON" ]; then
+    echo "Error: Python not found in AppImage"
+    exit 1
+fi
+
+# Change to application directory to ensure proper imports
+cd "$HERE/opt/android-file-handler"
+
+# Run with explicit single-threaded mode and ensure Python path is set
+PYTHONPATH="$HERE/opt/python3.12/lib/python3.12/site-packages:$HERE/opt/android-file-handler:$PYTHONPATH" exec "$PYTHON" -u launcher.py "$@"
+EOF
+
+chmod +x AppDir/AppRun
 
 # 9. Create icon in the correct location for appimagetool
 convert -size 256x256 xc:lightblue -pointsize 48 -fill black -gravity center -annotate +0+0 "AFH" AppDir/usr/share/icons/hicolor/256x256/apps/android-file-handler.png 2>/dev/null || true

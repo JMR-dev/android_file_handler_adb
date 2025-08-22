@@ -392,6 +392,86 @@ class AndroidFileHandlerGUI(tk.Tk):
         direction = self.direction_var.get()
         self.browser.show_browser(direction)
 
+    def show_file_folder_selection_notice(self):
+        """Show instructions for file and folder selection in a custom dialog."""
+        # Create custom dialog window
+        dialog = tk.Toplevel(self)
+        dialog.title("File/Folder Selection Notice")
+        dialog.geometry("600x250")
+        dialog.minsize(600, 250)
+        dialog.resizable(True, True)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Center the dialog on the parent window
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() // 2) - (600 // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (250 // 2)
+        dialog.geometry(f"600x250+{x}+{y}")
+        
+        # Track if OK was clicked
+        self.dialog_confirmed = False
+        
+        # Create main frame
+        main_frame = tk.Frame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Selection notice text
+        notice_text = (
+            "This is just a quick note about how file and folder selection works in this application.\n\n"
+            "If you want to select a file for transfer, simply click on the file to select it.\n\n"
+            "If you want to select a folder for transfer, the folder that you navigate to (the current directory you are viewing, not a highlighted folder) will be selected for transfer.\n\n"
+            "You can only transfer one file or one folder at a time."
+        )
+        
+        # Create responsive text label
+        text_label = tk.Label(
+            main_frame,
+            text=notice_text,
+            justify="left",
+            anchor="nw",
+            wraplength=0,  # Will be set dynamically
+            font=("Arial", 10)
+        )
+        text_label.pack(fill="both", expand=True, pady=(0, 20))
+        
+        # OK button with confirmation callback
+        def on_ok_clicked():
+            self.dialog_confirmed = True
+            dialog.destroy()
+        
+        ok_button = tk.Button(
+            main_frame,
+            text="OK",
+            command=on_ok_clicked,
+            width=10,
+            font=("Arial", 10)
+        )
+        ok_button.pack(pady=10)
+        
+        # Configure text wrapping on dialog resize
+        def on_dialog_configure(event):
+            if event.widget == dialog:
+                # Calculate available width for text (account for padding and margins)
+                available_width = dialog.winfo_width() - 60  # 20px padding * 2 + some margin
+                if available_width > 200:  # Minimum reasonable width
+                    text_label.config(wraplength=available_width)
+        
+        dialog.bind("<Configure>", on_dialog_configure)
+        
+        # Set initial wrap length
+        dialog.after(10, lambda: on_dialog_configure(type('Event', (), {'widget': dialog})()))
+        
+        # Handle window close (X button) - treat as cancel
+        def on_dialog_close():
+            self.dialog_confirmed = False
+            dialog.destroy()
+        
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+
     def browse_local_folder(self):
         """Browse for local folder or file based on direction."""
         import tkinter.filedialog as fd
@@ -399,14 +479,11 @@ class AndroidFileHandlerGUI(tk.Tk):
         from tkinter import messagebox
         
         # Show helpful notification about folder selection behavior
-        messagebox.showinfo(
-            "File/Folder Selection Notice",
-            "In this early stage of this program, if you are choosing a folder for transfer, "
-            "the folder you are actually in will be the one that is chosen for transfer, "
-            "not the one that you have highlighted/selected. File selection works "
-            "as normal - click on it and it will be chosen for transfer. Only one folder or "
-            "file may be moved at a time."
-        )
+        self.show_file_folder_selection_notice()
+        
+        # Only proceed if user clicked OK
+        if not getattr(self, 'dialog_confirmed', False):
+            return  # User closed dialog without clicking OK
         
         direction = self.direction_var.get()
         
@@ -759,7 +836,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             if success and self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
                 transfer_desc = "File" if is_file else "Folder"
-                self._update_status(f"{transfer_desc} transfer completed successfully.")
+                self._update_status(f"{transfer_desc} transfer completed successfully. To start another transfer, please select another file or folder.")
                 self.show_disable_debugging_reminder()
                 # Clear paths and disable button for next transfer
                 self.after(0, self._clear_paths_and_disable_button)
