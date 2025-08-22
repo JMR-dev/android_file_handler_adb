@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, filedialog, ttk
+from tkinter import messagebox, filedialog, ttk, scrolledtext
 
 try:
     # Try relative import first (when used as module)
@@ -26,52 +26,122 @@ except ImportError:
 try:
     # Try relative imports first
     from .file_browser import AndroidFileBrowser
+    from .license_agreement import LicenseAgreementFrame, check_license_agreement
 except ImportError:
     # Fall back to direct imports
     from src.gui.file_browser import AndroidFileBrowser
+    from src.gui.license_agreement import LicenseAgreementFrame, check_license_agreement
 
 
 class AndroidFileHandlerGUI(tk.Tk):
     """Main GUI application for Android file transfers."""
 
     def __init__(self):
+        """Initialize the main GUI application."""
         super().__init__()
-
+        
         # Initialize business logic
         self.adb_manager = ADBManager()
-
+        
         # Transfer tracking for thread safety
         self.current_transfer_id = 0
-        self.device_connected = False  # Track device connection state
+        self.device_connected = False
+        
+        # License agreement tracking
+        self.license_agreed = check_license_agreement()
+        self.license_frame = None
+        self.main_ui_created = False
+        
         self.troubleshooting_steps = (
             "Android device appears to have been disconnected and/or USB debugging is disabled.\n"
-            "Please ensure your Android device is securely connected to the computer at both ends.\n\n"
+            "Please ensure your Android device is securely connected at both ends.\n\n"
+            
             "To enable USB debugging:\n"
-            "1. Connect your device to the computer via USB.\n"
-            "2. Open Settings → About phone.\n"
-            "3. Tap 'Build number' seven times to unlock Developer Options.\n"
-            "4. Go back to Settings → Developer Options.\n"
-            "5. Enable 'USB debugging'.\n"
-            "6. Connect your phone via USB and accept the prompt to allow debugging.\n\n"
-            "Additionally, ensure your device is set to 'File Transfer' mode:\n"
-            "1. When you connect your device, swipe down to check the notification panel.\n"
-            "2. Look for a 'USB' notification that will tell you what mode the device is in (usually 'Charging over USB') and tap it.\n"
-            "3. Select 'File Transfer' or 'MTP' mode.\n\n"
-            "After enabling USB debugging and file transfer mode, please click the 'Recheck for connected Android device' button to try again."
+            "1. Connect your device to the computer via USB\n"
+            "2. Open Settings → About phone\n"
+            "3. Tap 'Build number' seven times to unlock Developer Options\n"
+            "   (You only need to do this once unless you disable it, reset settings, or wipe your device)\n"
+            "4. Navigate back and go to System → Developer Options\n"
+            "5. Find and enable 'USB debugging'\n"
+            "   (Tip: Use the search icon at the top if you can't find it)\n"
+            "6. Connect via USB and tap 'Trust' when prompted\n"
+            "   (Checking 'Remember' is recommended for future transfers)\n\n"
+            
+            "Ensure File Transfer mode is enabled:\n"
+            "1. After connecting, swipe down to view notifications\n"
+            "2. Look for a USB notification (often shows 'Charging over USB')\n"
+            "3. Tap the notification and select 'File Transfer' or 'MTP' mode\n\n"
+            
+            "Note: Menu names may vary by Android version:\n"
+            "• Some devices show 'Developer options' under 'System'\n"
+            "• Others may have it directly in the main Settings menu\n"
+            "• Samsung devices might show 'Software information' instead of 'About phone'\n\n"
+            
+            "If you're still having trouble:\n"
+            "• Try a different USB cable or port (some cables only support charging)\n"
+            "• Restart both your phone and computer\n"
+            "• Make sure your phone screen is unlocked when connecting\n"
+            "• Set your phone screen timeout to 30 minutes (especially for long transfers)\n\n"
+            "• Use a different computer to test if the issue is computer-specific\n"
+            
+            "Windows users: If you see a driver installation popup, please allow it to complete.\n"
+            "Linux users: You may need to run 'sudo usermod -a -G plugdev $USER' and reboot.\n"
+            
+            "After completing these steps, click 'Recheck for connected Android device' to try again."
         )
-        # Setup UI
-        self._setup_ui()
-        self._initialize_components()
-        self._initialize_app()
+        
+        # Setup UI based on license status
+        self._setup_initial_ui()
 
-    def _setup_ui(self):
-        """Setup the user interface."""
+    def _setup_initial_ui(self):
+        """Setup the initial UI - either license agreement or main interface."""
         # Window configuration
         self.title("Android File Handler")
         self.geometry("520x320")
         self.minsize(520, 320)
         self.resizable(True, True)
+        
+        if not self.license_agreed:
+            # Show license agreement first
+            self._show_license_agreement()
+        else:
+            # Show main interface directly
+            self._show_main_interface()
 
+    def _show_license_agreement(self):
+        """Show the license agreement interface."""
+        # Adjust window size for license agreement
+        self.geometry("700x600")
+        self.minsize(700, 600)
+        
+        # Create license agreement frame
+        self.license_frame = LicenseAgreementFrame(self, self._on_license_agreed)
+    
+    def _on_license_agreed(self):
+        """Handle when user agrees to license."""
+        self.license_agreed = True
+        
+        # Remove license frame
+        if self.license_frame:
+            self.license_frame.destroy()
+            self.license_frame = None
+        
+        # Switch to main interface
+        self._show_main_interface()
+    
+    def _show_main_interface(self):
+        """Show the main application interface."""
+        # Reset window size for main interface
+        self.geometry("520x320")
+        self.minsize(520, 320)
+        
+        # Setup main UI
+        self._setup_main_ui()
+        self._initialize_components()
+        self._initialize_app()
+
+    def _setup_main_ui(self):
+        """Setup the main user interface."""
         # Direction selection
         self.direction_var = tk.StringVar(value="pull")
         direction_frame = tk.Frame(self)
@@ -265,16 +335,27 @@ class AndroidFileHandlerGUI(tk.Tk):
         """Initialize the application - check ADB and device."""
         # Check adb availability
         if not is_adb_available():
+            # Show welcome message when platform-tools need to be downloaded
+            messagebox.showinfo(
+                "Welcome to Android File Transfer!",
+                "Welcome to Android File Transfer! This application simplifies "
+                "and speeds up file transfers over USB between computers and Android devices. "
+                "Please do not delete or move the platform-tools folder that will be "
+                "downloaded. These are tools written by Google "
+                "and they are required for this application to function properly."
+            )
+            
             self.disable_controls()
             self._update_status("ADB not found locally. Downloading...")
             self.update()
-            success = self.adb_manager.download_and_extract_adb()
+            self.adb_manager.download_and_extract_adb()
+            success = is_adb_available()
             if success:
                 self._update_status("ADB downloaded and ready.")
                 self.enable_controls()
             else:
                 self._update_status(
-                    "Failed to download ADB. Please check your internet and restart."
+                    "Failed to download/access Android Debug Bridge tools. Please check your internet and for any blocking security pop-ups and restart."
                 )
                 messagebox.showerror("Error", "Failed to download ADB tools. Exiting.")
                 self.quit()
@@ -315,6 +396,17 @@ class AndroidFileHandlerGUI(tk.Tk):
         """Browse for local folder or file based on direction."""
         import tkinter.filedialog as fd
         import os
+        from tkinter import messagebox
+        
+        # Show helpful notification about folder selection behavior
+        messagebox.showinfo(
+            "File/Folder Selection Notice",
+            "In this early stage of this program, if you are choosing a folder for transfer, "
+            "the folder you are actually in will be the one that is chosen for transfer, "
+            "not the one that you have highlighted/selected. File selection works "
+            "as normal - click on it and it will be chosen for transfer. Only one folder or "
+            "file may be moved at a time."
+        )
         
         direction = self.direction_var.get()
         
@@ -693,7 +785,7 @@ class AndroidFileHandlerGUI(tk.Tk):
             success = self.adb_manager.pull_folder(remote_path, local_path)
             if success and self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
-                self._update_status("Transfer completed successfully.")
+                self._update_status("Transfer completed successfully. To start another transfer, please select another file or folder.")
                 self.show_disable_debugging_reminder()
                 # Clear paths and disable button for next transfer
                 self.after(0, self._clear_paths_and_disable_button)

@@ -7,11 +7,11 @@ authors = [
 ]
 license = { text = "MIT" }
 readme = "README.md"
-requires-python = "<3.13,>=3.9"
+requires-python = "<3.13,>=3.12"
 dependencies = ["requests>=2.32.4,<3.0.0"]
 
 [tool.poetry.dependencies]
-python = "<3.13,>=3.9"
+python = "<3.13,>=3.12"
 requests = ">=2.32.4,<3.0.0"
 
 [build-system]
@@ -22,11 +22,6 @@ build-backend = "poetry.core.masonry.api"
 # Main application entry point
 android-file-handler = "src.main:main"
 
-# Development and maintenance scripts
-dev = "python src/main.py"
-gui = "python src/gui.py"
-test-adb = "python -c 'from src.adb_manager import ADBManager; m = ADBManager(); print(f\"ADB Available: {m.check_device()}\")"
-clean-adb = "python -c 'import shutil, os; shutil.rmtree(\"src/platform-tools\", ignore_errors=True); print(\"ADB cache cleared\")'"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.0.0"
