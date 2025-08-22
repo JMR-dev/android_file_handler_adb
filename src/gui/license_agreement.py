@@ -136,18 +136,6 @@ class LicenseAgreementFrame(tk.Frame):
         button_frame.pack(fill=tk.X, pady=(10, 0))
         
         # Buttons
-        self.disagree_btn = tk.Button(
-            button_frame, 
-            text="Disagree & Exit", 
-            command=self.on_disagree,
-            bg="#ff6b6b",
-            fg="white",
-            font=("Arial", 11, "bold"),
-            width=15,
-            height=2
-        )
-        self.disagree_btn.pack(side=tk.LEFT)
-        
         self.agree_btn = tk.Button(
             button_frame, 
             text="I Agree", 
@@ -158,7 +146,19 @@ class LicenseAgreementFrame(tk.Frame):
             width=15,
             height=2
         )
-        self.agree_btn.pack(side=tk.RIGHT)
+        self.agree_btn.pack(side=tk.LEFT)
+        
+        self.disagree_btn = tk.Button(
+            button_frame, 
+            text="Disagree & Exit", 
+            command=self.on_disagree,
+            bg="#ff6b6b",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            width=15,
+            height=2
+        )
+        self.disagree_btn.pack(side=tk.RIGHT)
         
         # Center text
         center_label = tk.Label(
