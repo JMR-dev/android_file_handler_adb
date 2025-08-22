@@ -15,6 +15,52 @@ import time
 import re
 from typing import Optional, Tuple, Callable
 
+def get_executable_directory() -> str:
+    """Get the directory containing the executable or script."""
+    if getattr(sys, 'frozen', False):
+        # Running as executable (PyInstaller, cx_Freeze, etc.)
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as script - use the script's directory
+        return os.path.dirname(os.path.abspath(__file__))
+
+def get_platform_tools_directory() -> str:
+    """Get platform-tools directory with executable and AppImage support."""
+    base_dir = get_executable_directory()
+    
+    # For AppImages running from temporary mounts, use persistent storage
+    if sys.platform.startswith('linux') and ('tmp' in base_dir and '.mount_' in base_dir):
+        # AppImage temporary mount - use persistent user directory
+        home_dir = os.path.expanduser("~")
+        persistent_dir = os.path.join(home_dir, ".android-file-handler", "platform-tools")
+        os.makedirs(os.path.dirname(persistent_dir), exist_ok=True)
+        return persistent_dir
+    
+    # Check if we're in development mode (running from src/ directory)
+    if not getattr(sys, 'frozen', False):
+        # Running as script - check if we're in src/ directory or subdirectory
+        if base_dir.endswith('src'):
+            # Already in src directory - place platform-tools here
+            return os.path.join(base_dir, "platform-tools")
+        elif base_dir.endswith('gui') or os.path.basename(base_dir) in ['gui']:
+            # In src/gui subdirectory - go up one level to src
+            src_dir = os.path.dirname(base_dir)
+            return os.path.join(src_dir, "platform-tools")
+        else:
+            # Not in src structure - assume we need to find/create src directory
+            # This handles cases where the script might be run from project root
+            current_dir = base_dir
+            src_dir = os.path.join(current_dir, "src")
+            if os.path.exists(src_dir):
+                return os.path.join(src_dir, "platform-tools")
+            else:
+                # Fallback to current directory
+                return os.path.join(base_dir, "src", "platform-tools")
+    
+    # Running as executable - use directory next to binary
+    return os.path.join(base_dir, "platform-tools")
+
+
 # Constants
 ADB_WIN_ZIP_URL = (
     "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
@@ -22,9 +68,7 @@ ADB_WIN_ZIP_URL = (
 ADB_LINUX_ZIP_URL = (
     "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 )
-LOCAL_ADB_FOLDER = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "platform-tools"
-)
+LOCAL_ADB_FOLDER = get_platform_tools_directory()
 OS_TYPE = sys.platform
 
 # Determine ADB binary name based on platform
@@ -100,7 +144,11 @@ class ADBManager:
             response.raise_for_status()
 
             binary_archive = zipfile.ZipFile(io.BytesIO(response.content))
-            binary_archive.extractall(LOCAL_ADB_FOLDER)
+            
+            # Extract to parent directory since the zip contains platform-tools/ folder
+            extract_to = os.path.dirname(LOCAL_ADB_FOLDER)
+            os.makedirs(extract_to, exist_ok=True)
+            binary_archive.extractall(extract_to)
 
             if OS_TYPE.startswith("linux"):
                 if os.path.exists(ADB_BINARY_PATH):
@@ -781,3 +829,5 @@ def is_adb_available() -> bool:
 def get_platform_type() -> str:
     """Get the current platform type."""
     return OS_TYPE
+
+
