@@ -4,6 +4,7 @@ build_temp/
 AppDir/
 build
 *.ini
+squashfs-root
 
 # Python cache files
 __pycache__/

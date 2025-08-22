@@ -24,6 +24,7 @@ This is a small Python GUI tool for managing Android device files via ADB (Andro
 - Use f-strings for string formatting.
 - No single letter variable names except for `e` when appropriate.
 - Do not recreate files I have deleted.
+- Do not change user facing text unless asked to do so.
 
 ## UI guidelines
 
