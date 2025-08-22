@@ -1,7 +1,7 @@
 
 # Android File Handler (ADB)
 
-A simple Windows GUI tool to pull folders from an Android device using ADB (Android Debug Bridge). The tool automatically downloads the latest ADB platform-tools if not present, checks for a connected device, and provides a user-friendly interface for selecting remote and local folders.
+A simple Windows GUI tool to pull folders from an Android device using ADB (Android Debug Bridge). The tool automatically downloads the latest ADB platform-tools if not present, checks for a connected device, and provides a user-friendly interface for selecting remote and local single files and folders.
 
 ## Features
 
@@ -16,13 +16,14 @@ A simple Windows GUI tool to pull folders from an Android device using ADB (Andr
 - Windows or Linux
 - Python 3.8+
 - [Poetry](https://python-poetry.org/) for dependency management
+- (Optional) pyenv for Python version managment
 
 ## Installation
 
 1. Clone this repository:
 
    ```sh
-   git clone https://github.com/JMR-dev/android_file_handler_adb.git
+   git clone git@github.com:JMR-dev/android_file_handler_adb.git
    cd android_file_handler_adb
    ```
 
@@ -37,15 +38,13 @@ A simple Windows GUI tool to pull folders from an Android device using ADB (Andr
 1. Activate the virtual environment:
 
    ```sh
-   poetry shell
+   poetry env activate
    ```
-
-   Or manually activate the environment as described in the Poetry documentation.
 
 2. Run the application:
 
    ```sh
-   python android_folder_puller.py
+   poetry run python3 src/main.py
    ```
 
 3. Follow the on-screen instructions:
@@ -57,7 +56,6 @@ A simple Windows GUI tool to pull folders from an Android device using ADB (Andr
 
 - **ADB not found:** The tool will attempt to download and extract ADB automatically.
 - **No device detected:** Ensure your device is connected via USB and USB debugging is enabled. The app provides instructions if needed.
-- **Permissions:** Some folders on the device may require root access.
 
 ## License
 

@@ -6,6 +6,7 @@ Core GUI application window for Android file transfers.
 import os
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 
@@ -807,6 +808,14 @@ def main():
         sys.exit(1)
 
     app = AndroidFileHandlerGUI()
+    # If running in CI mode, auto-close after 10 seconds
+    if os.getenv('CI_MODE') == 'true':
+        def auto_close():
+            time.sleep(10)
+            app.quit()
+        
+        threading.Thread(target=auto_close, daemon=True).start()
+        print("CI Mode: Application will auto-close in 10 seconds")
     app.mainloop()
 
 

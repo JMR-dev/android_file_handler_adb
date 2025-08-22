@@ -1,4 +1,5 @@
-src/platform-tools
+platform-tools**
+dist/
 
 # Python cache files
 __pycache__/
