@@ -559,8 +559,8 @@ class AndroidFileHandlerGUI(tk.Tk):
         # Create custom dialog window
         dialog = tk.Toplevel(self)
         dialog.title("Check device connection and enable USB Debugging")
-        dialog.geometry("700x600")  # Increased height for better button spacing
-        dialog.minsize(700, 600)  # Set minimum size to ensure all content is visible
+        dialog.geometry("700x800")  # Increased height for better button spacing
+        dialog.minsize(700, 800)  # Set minimum size to ensure all content is visible
         dialog.resizable(True, True)
         dialog.transient(self)
         dialog.grab_set()
