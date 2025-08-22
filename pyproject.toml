@@ -29,11 +29,19 @@ test-adb = "python -c 'from src.adb_manager import ADBManager; m = ADBManager();
 clean-adb = "python -c 'import shutil, os; shutil.rmtree(\"src/platform-tools\", ignore_errors=True); print(\"ADB cache cleared\")'"
 
 [tool.poetry.group.dev.dependencies]
-black = "^25.1.0"
+black = "^25.0.0"
+flake8 = "^6.0.0"
 mypy = "^1.5.0"
-pylint = "^3.3.8"
-pytest = "^8.4.1"
-pyinstaller = "^6.15.0"
+pre-commit = "^3.4.0"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.4.0"
+pytest-qt = "^4.2.0"
+pytest-mock = "^3.11.0"
+pytest-cov = "^4.1.0"
+
+[tool.poetry.group.build.dependencies]
+pyinstaller = "^5.13.0"
 
 [tool.black]
 line-length = 88
