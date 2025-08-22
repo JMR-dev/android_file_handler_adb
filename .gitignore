@@ -1,5 +1,9 @@
 platform-tools**
 dist/
+build_temp/
+AppDir/
+build
+
 
 # Python cache files
 __pycache__/
