@@ -5,7 +5,7 @@ AppDir/
 build
 *.ini
 squashfs-root
-*.spec
+
 
 # Python cache files
 __pycache__/
