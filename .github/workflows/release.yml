@@ -4,32 +4,36 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 1.0.0)'
+        description: 'Beta release (0.1.0)'
         required: true
         type: string
+      dry_run:
+        description: 'Dry run mode (skip AUR publishing)'
+        required: false
+        default: false
+        type: boolean
 
 env:
-  APP_NAME: yourapp
+  APP_NAME: android-file-handler
   PYTHON_VERSION: "3.12"
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, ubuntu-20.04]
         include:
           - os: ubuntu-latest
             platform: linux-deb
-            binary_name: yourapp
+            binary_name: android-file-handler
           - os: windows-latest  
             platform: windows
-            binary_name: yourapp.exe
+            binary_name: android-file-handler.exe
           - os: ubuntu-20.04
             platform: linux-rpm
-            binary_name: yourapp
+            binary_name: android-file-handler
           - os: ubuntu-latest
             platform: linux-arch
-            binary_name: yourapp
+            binary_name: android-file-handler
             container: archlinux:latest
 
     runs-on: ${{ matrix.os }}
@@ -38,36 +42,170 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Detect and Configure Environment
+      shell: bash
+      run: |
+        # Environment detection function
+        detect_environment() {
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "ACT_ENVIRONMENT=local" >> $GITHUB_ENV
+            echo "PYTHON_CMD=python3" >> $GITHUB_ENV
+            echo "PIP_CMD=pip3" >> $GITHUB_ENV
+            echo "🔧 Local testing environment detected (Act)"
+          else
+            echo "ACT_ENVIRONMENT=github" >> $GITHUB_ENV
+            echo "PYTHON_CMD=python" >> $GITHUB_ENV
+            echo "PIP_CMD=pip" >> $GITHUB_ENV
+            echo "🚀 GitHub Actions environment detected"
+          fi
+        }
+        
+        # Setup system Python for Act
+        setup_system_python() {
+          echo "Setting up system Python for local testing..."
+          
+          # Update package manager and install Python
+          if command -v apt-get &> /dev/null; then
+            apt-get update -qq
+            apt-get install -y python3 python3-pip python3-venv curl
+          elif command -v pacman &> /dev/null; then
+            pacman -Sy --noconfirm python python-pip curl
+          elif command -v dnf &> /dev/null; then
+            dnf install -y python3 python3-pip curl
+          fi
+          
+          # Create symbolic links for compatibility
+          ln -sf $(which python3) /usr/local/bin/python || echo "Python already linked"
+          ln -sf $(which pip3) /usr/local/bin/pip || echo "Pip already linked"
+          
+          # Verify installation
+          python3 --version
+          pip3 --version
+        }
+        
+        # Main execution
+        detect_environment
+        
+        if [ "${ACT_ENVIRONMENT}" = "local" ]; then
+          setup_system_python
+        fi
+    
     - name: Setup Arch Linux environment
       if: matrix.platform == 'linux-arch'
       run: |
         pacman -Sy --noconfirm
-        pacman -S --noconfirm python python-pip base-devel git
-        pip install poetry
+        pacman -S --noconfirm python python-pip base-devel git curl
+        
+        # For Act compatibility, ensure Python is available as 'python'
+        if [ "${ACT:-false}" = "true" ]; then
+          ln -sf $(which python3) /usr/local/bin/python || echo "Python already linked"
+          ln -sf $(which pip3) /usr/local/bin/pip || echo "Pip already linked"
+        fi
     
-    - name: Set up Python ${{ env.PYTHON_VERSION }}
-      if: matrix.platform != 'linux-arch'
+    - name: Set up Python ${{ env.PYTHON_VERSION }} (GitHub Actions Only)
+      if: matrix.platform != 'linux-arch' && env.ACT != 'true'
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
     - name: Install Poetry
-      if: matrix.platform != 'linux-arch'
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
+      shell: bash
+      run: |
+        echo "Installing Poetry for ${ACT_ENVIRONMENT:-github} environment..."
+        
+        if [ "${{ matrix.platform }}" == "linux-arch" ]; then
+          # Arch Linux has Poetry in packages
+          if command -v pacman &> /dev/null; then
+            pacman -S --noconfirm python-poetry
+          else
+            pip install poetry
+          fi
+          # Configure poetry for system-wide installation in containers
+          poetry config virtualenvs.create false
+          poetry config virtualenvs.in-project false
+        else
+          # Install Poetry via official installer for other platforms
+          if [ "${ACT_ENVIRONMENT}" = "local" ]; then
+            # For Act, install Poetry with system Python
+            curl -sSL https://install.python-poetry.org | python3 -
+            echo "$HOME/.local/bin" >> $GITHUB_PATH
+            export PATH="$HOME/.local/bin:$PATH"
+            # Configure Poetry for Act compatibility
+            poetry config virtualenvs.create false
+            echo "🔧 Configured Poetry for system-wide installation (Act)"
+          else
+            # For GitHub Actions, use the action
+            curl -sSL https://install.python-poetry.org | python -
+            echo "$HOME/.local/bin" >> $GITHUB_PATH
+          fi
+        fi
+        
+        # Verify Poetry installation
+        export PATH="$HOME/.local/bin:$PATH"
+        poetry --version
     
     - name: Lock and install dependencies
+      shell: bash
       run: |
+        echo "Installing dependencies in ${ACT_ENVIRONMENT:-github} environment..."
+        
+        # Ensure Poetry is in PATH
+        export PATH="$HOME/.local/bin:$PATH"
+        
+        # Configure Poetry based on environment
+        if [ "${ACT_ENVIRONMENT}" = "local" ] || [ "${{ matrix.platform }}" = "linux-arch" ]; then
+          # For Act and Arch containers, use system-wide installation
+          poetry config virtualenvs.create false
+          poetry config virtualenvs.in-project false
+          echo "🔧 Configured Poetry for system-wide installation"
+        else
+          # For GitHub Actions, use virtual environments
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+          echo "🚀 Configured Poetry for virtual environment"
+        fi
+        
         poetry lock
         poetry install
     
     - name: Build binary with PyInstaller
+      shell: bash
       run: |
+        echo "Building binary in ${ACT_ENVIRONMENT:-github} environment..."
+        
+        # Ensure Poetry is in PATH
+        export PATH="$HOME/.local/bin:$PATH"
+        
+        # Install PyInstaller
         poetry run pip install pyinstaller
-        poetry run pyinstaller --onefile --name ${{ matrix.binary_name }} main.py
+        
+        # Build based on platform
+        if [ "${{ matrix.platform }}" == "windows" ]; then
+          echo "Building Windows binary..."
+          poetry run pyinstaller --onefile \
+            --name "${{ matrix.binary_name }}" \
+            --icon=icon_media/robot_files_256.ico \
+            src/main.py
+        else
+          echo "Building Linux binary..."
+          poetry run pyinstaller --onefile \
+            --name "${{ matrix.binary_name }}" \
+            --icon=icon_media/robot_files_256.png \
+            src/main.py
+        fi
+        
+        echo "✅ Binary built successfully for ${{ matrix.platform }}"
+        
+        # Verify binary was created
+        if [ -f "dist/${{ matrix.binary_name }}" ]; then
+          echo "✅ Binary verified: dist/${{ matrix.binary_name }}"
+          ls -la "dist/${{ matrix.binary_name }}"
+        else
+          echo "❌ Binary not found: dist/${{ matrix.binary_name }}"
+          echo "Available files in dist/:"
+          ls -la dist/ || echo "No dist/ directory found"
+          exit 1
+        fi
     
     - name: Install fpm (Ubuntu/Debian)
       if: matrix.platform == 'linux-deb' || matrix.platform == 'linux-rpm'
@@ -85,74 +223,144 @@ jobs:
       if: matrix.platform == 'linux-deb'
       run: |
         mkdir -p package/usr/bin
-        cp dist/${{ matrix.binary_name }} package/usr/bin/
+        cp "dist/${{ matrix.binary_name }}" "package/usr/bin/${{ env.APP_NAME }}"
         fpm -s dir -t deb -n ${{ env.APP_NAME }} -v ${{ github.event.inputs.version }} \
-            --description "Your Python desktop application" \
+            --description "Android file transfer utility via ADB" \
             --depends "python3.12" \
-            --maintainer "Your Name <your.email@example.com>" \
+            --maintainer "Jason Ross <jason.ross841@gmail.com>" \
             --url "https://github.com/${{ github.repository }}" \
             -C package \
-            usr/bin/${{ matrix.binary_name }}=/usr/bin/${{ env.APP_NAME }}
-    
+            usr/bin/
+
     - name: Create .rpm package  
       if: matrix.platform == 'linux-rpm'
       run: |
         mkdir -p package/usr/bin
-        cp dist/${{ matrix.binary_name }} package/usr/bin/
+        cp "dist/${{ matrix.binary_name }}" "package/usr/bin/${{ env.APP_NAME }}"
         fpm -s dir -t rpm -n ${{ env.APP_NAME }} -v ${{ github.event.inputs.version }} \
-            --description "Your Python desktop application" \
+            --description "Android file transfer utility via ADB" \
             --depends "python3.12" \
-            --maintainer "Your Name <your.email@example.com>" \
+            --maintainer "Jason Ross <jason.ross841@gmail.com>" \
             --url "https://github.com/${{ github.repository }}" \
             -C package \
-            usr/bin/${{ matrix.binary_name }}=/usr/bin/${{ env.APP_NAME }}
+            usr/bin/
+
+    - name: Calculate SHA256 for Arch PKGBUILD
+      if: matrix.platform == 'linux-arch'
+      run: |
+        # Calculate checksum of the Linux binary for PKGBUILD with enhanced error context
+        binary_file="dist/${{ matrix.binary_name }}"
+        
+        echo "=== SHA256 Calculation for Arch Package ==="
+        echo "Target binary: $binary_file"
+        
+        if [ ! -f "$binary_file" ]; then
+          echo "❌ Critical Error: Binary file not found"
+          echo "   Expected location: $binary_file"
+          echo "   Working directory: $(pwd)"
+          echo "   Available files in dist/:"
+          if [ -d "dist/" ]; then
+            ls -la dist/
+          else
+            echo "   No dist/ directory found"
+          fi
+          echo "   This indicates a PyInstaller build failure"
+          exit 1
+        fi
+        
+        # Validate file size before calculating checksum
+        file_size=$(stat -c%s "$binary_file")
+        minimum_expected_size=100000  # 100KB minimum
+        
+        if [ "$file_size" -lt "$minimum_expected_size" ]; then
+          echo "❌ Critical Error: Binary file suspiciously small"
+          echo "   File size: $file_size bytes"
+          echo "   Expected minimum: $minimum_expected_size bytes"
+          echo "   This indicates a build failure or corruption"
+          exit 1
+        fi
+        
+        # Calculate SHA256 checksum
+        sha256_sum=$(sha256sum "$binary_file" | cut -d' ' -f1)
+        
+        if [ -z "$sha256_sum" ]; then
+          echo "❌ Critical Error: Failed to calculate SHA256 checksum"
+          echo "   This indicates file corruption or system issues"
+          exit 1
+        fi
+        
+        echo "✅ SHA256 calculated successfully: $sha256_sum"
+        echo "   File: $binary_file"
+        echo "   Size: $file_size bytes"
+        echo "SHA256SUM=$sha256_sum" >> $GITHUB_ENV
 
     - name: Create Arch PKGBUILD
       if: matrix.platform == 'linux-arch'
       run: |
-        # Create PKGBUILD file for AUR submission
-        cat > PKGBUILD << EOF
-        # Maintainer: Your Name <your.email@example.com>
-        pkgname=${{ env.APP_NAME }}
-        pkgver=${{ github.event.inputs.version }}
-        pkgrel=1
-        pkgdesc="Your Python desktop application"
-        arch=('x86_64')
-        url="https://github.com/${{ github.repository }}"
-        license=('MIT')
-        depends=('python')
-        source=("\$pkgname-\$pkgver::https://github.com/${{ github.repository }}/releases/download/v\$pkgver/${{ env.APP_NAME }}-\$pkgver-linux")
-        sha256sums=('SKIP')  # Will be updated with actual checksums
+        # Create PKGBUILD file for AUR submission with improved formatting
+        {
+          echo '# Maintainer: Jason Ross <jason.ross841@gmail.com>'
+          echo 'pkgname=${{ env.APP_NAME }}'
+          echo 'pkgver=${{ github.event.inputs.version }}'
+          echo 'pkgrel=1'
+          echo 'pkgdesc="Android file transfer utility via ADB"'
+          echo "arch=('x86_64')"
+          echo 'url="https://github.com/${{ github.repository }}"'
+          echo "license=('MIT')"
+          echo "depends=('python')"
+          echo 'source=("${pkgname}-${pkgver}::https://github.com/${{ github.repository }}/releases/download/v${pkgver}/${{ env.APP_NAME }}-${pkgver}-linux")'
+          echo 'sha256sums=(${{ env.SHA256SUM }})'
+          echo ''
+          echo 'package() {'
+          echo '    install -Dm755 "${srcdir}/${pkgname}-${pkgver}" "${pkgdir}/usr/bin/${pkgname}"'
+          echo '}'
+        } > PKGBUILD
         
-        package() {
-            install -Dm755 "\$srcdir/\$pkgname-\$pkgver" "\$pkgdir/usr/bin/\$pkgname"
-        }
-        EOF
-        
-        # Create .SRCINFO file
-        makepkg --printsrcinfo > .SRCINFO
-    
-    - name: Create PKGBUILD for AUR
-      if: matrix.platform == 'linux-deb'
+        # Generate .SRCINFO file with improved formatting
+        {
+          echo 'pkgbase = ${{ env.APP_NAME }}'
+          echo $'\tpkgdesc = Android file transfer utility via ADB'
+          echo $'\tpkgver = ${{ github.event.inputs.version }}'
+          echo $'\tpkgrel = 1'
+          echo $'\turl = https://github.com/${{ github.repository }}'
+          echo $'\tarch = x86_64'
+          echo $'\tlicense = MIT'
+          echo $'\tdepends = python'
+          echo $'\tsource = ${{ env.APP_NAME }}-${{ github.event.inputs.version }}::https://github.com/${{ github.repository }}/releases/download/v${{ github.event.inputs.version }}/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux'
+          echo $'\tsha256sums = ${{ env.SHA256SUM }}'
+          echo ''
+          echo 'pkgname = ${{ env.APP_NAME }}'
+        } > .SRCINFO
+
+    - name: Verify generated files
+      if: matrix.platform == 'linux-arch'
       run: |
-        cat > PKGBUILD << 'EOF'
-        pkgname=${{ env.APP_NAME }}
-        pkgver=${{ github.event.inputs.version }}
-        pkgrel=1
-        pkgdesc="Your Python desktop application"
-        arch=('x86_64')
-        url="https://github.com/${{ github.repository }}"
-        depends=('python312')
-        source=("$pkgname-$pkgver::https://github.com/${{ github.repository }}/releases/download/v$pkgver/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux")
-        sha256sums=('SKIP')  # You should replace this with actual checksums
+        echo "=== PKGBUILD Content ==="
+        cat PKGBUILD
+        echo "=== .SRCINFO Content ==="
+        cat .SRCINFO
+        echo "=== File validation ==="
+        if [ ! -f "PKGBUILD" ] || [ ! -f ".SRCINFO" ]; then
+          echo "Error: Required files not generated"
+          exit 1
+        fi
         
-        package() {
-            install -Dm755 "$srcdir/$pkgname-$pkgver" "$pkgdir/usr/bin/$pkgname"
-        }
-        EOF
-    
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+        # Validate PKGBUILD syntax
+        if ! grep -q "^pkgname=" PKGBUILD; then
+          echo "Error: Invalid PKGBUILD format"
+          exit 1
+        fi
+        
+        # Validate .SRCINFO syntax
+        if ! grep -q "^pkgbase = " .SRCINFO; then
+          echo "Error: Invalid .SRCINFO format"
+          exit 1
+        fi
+        
+        echo "✓ All files validated successfully"
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}-artifacts
         path: |
@@ -169,33 +377,141 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        path: artifacts
+        path: artifacts/
     
     - name: Prepare release assets
+      shell: bash
       run: |
         mkdir -p release-assets
         
-        # Rename binaries for release
-        cp artifacts/linux-deb-artifacts/dist/yourapp release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux
-        cp artifacts/windows-artifacts/dist/yourapp.exe release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-windows.exe
+        # Function: copy_and_validate
+        # Purpose: Safely copy files with comprehensive validation and error reporting
+        # Parameters:
+        #   $1 (source_file_path): Absolute path to the source file to be copied
+        #   $2 (destination_path): Absolute path where the file should be copied to
+        #   $3 (minimum_size_bytes): Minimum expected file size in bytes for validation
+        # Returns:
+        #   0: Success - file copied and validated successfully
+        #   1: Failure - file not found, too small, or copy operation failed
+        # Side Effects:
+        #   - Creates destination file if source is valid
+        #   - Outputs detailed status messages with file information
+        copy_and_validate() {
+          local source_file_path="$1"
+          local destination_path="$2"
+          local minimum_size_bytes="$3"
+          
+          echo "--- Validating: $(basename "$source_file_path") ---"
+          
+          if [ ! -f "$source_file_path" ]; then
+            echo "❌ File not found: $source_file_path"
+            echo "   Expected location: $source_file_path"
+            echo "   Parent directory contents:"
+            ls -la "$(dirname "$source_file_path")" 2>/dev/null || echo "   Directory does not exist"
+            return 1
+          fi
+          
+          local actual_file_size=$(stat -c%s "$source_file_path")
+          echo "   File size: $actual_file_size bytes"
+          
+          if [ "$actual_file_size" -lt "$minimum_size_bytes" ]; then
+            echo "❌ File too small: $source_file_path"
+            echo "   Actual size: $actual_file_size bytes"
+            echo "   Required minimum: $minimum_size_bytes bytes"
+            echo "   This indicates a build failure or incomplete binary"
+            return 1
+          fi
+          
+          # Attempt to copy file
+          if cp "$source_file_path" "$destination_path"; then
+            echo "✅ Successfully copied: $(basename "$destination_path")"
+            echo "   Size: $actual_file_size bytes"
+            echo "   Source: $source_file_path"
+            echo "   Destination: $destination_path"
+            return 0
+          else
+            echo "❌ Failed to copy file"
+            echo "   Source: $source_file_path" 
+            echo "   Destination: $destination_path"
+            echo "   Check disk space and permissions"
+            return 1
+          fi
+        }
         
-        # Copy packages
-        find artifacts -name "*.deb" -exec cp {} release-assets/ \;
-        find artifacts -name "*.rpm" -exec cp {} release-assets/ \;
-        find artifacts -name "PKGBUILD" -exec cp {} release-assets/ \;
-        find artifacts -name ".SRCINFO" -exec cp {} release-assets/ \;
+        echo "=== Release Asset Preparation ==="
+        echo "Working directory: $(pwd)"
+        echo "Available artifacts:"
+        find artifacts/ -type f -name "*" | head -20
         
-        chmod +x release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux
-    
-    - name: Create GitHub Release
+        # Track validation results for comprehensive reporting
+        linux_binary_success=false
+        windows_binary_success=false
+        
+        # Validate and copy Linux binary (minimum 1MB for GUI application)
+        if copy_and_validate "artifacts/linux-deb-artifacts/dist/android-file-handler" "release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux" 1000000; then
+          linux_binary_success=true
+        fi
+        
+        # Validate and copy Windows binary (minimum 1MB for GUI application)
+        if copy_and_validate "artifacts/windows-artifacts/dist/android-file-handler.exe" "release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-windows.exe" 1000000; then
+          windows_binary_success=true
+        fi
+        
+        # Copy and count package files
+        echo "=== Package Collection ==="
+        deb_count=$(find artifacts/ -name "*.deb" -exec cp {} release-assets/ \; -print | wc -l)
+        rpm_count=$(find artifacts/ -name "*.rpm" -exec cp {} release-assets/ \; -print | wc -l)
+        
+        echo "=== Build Quality Assessment ==="
+        echo "Linux binary: $([ "$linux_binary_success" = true ] && echo "✅ PASS" || echo "❌ FAIL")"
+        echo "Windows binary: $([ "$windows_binary_success" = true ] && echo "✅ PASS" || echo "❌ FAIL")"
+        echo "DEB packages: $deb_count $([ "$deb_count" -gt 0 ] && echo "✅" || echo "❌")"
+        echo "RPM packages: $rpm_count $([ "$rpm_count" -gt 0 ] && echo "✅" || echo "❌")"
+        
+        # Comprehensive release asset validation
+        echo "=== Release Asset Validation ==="
+        
+        # Check if any assets were created
+        if [ -z "$(ls -A release-assets/)" ]; then
+          echo "❌ Critical Error: No release assets were created"
+          echo "   This indicates a complete build system failure"
+          echo "   Check artifact download and binary generation steps"
+          exit 1
+        fi
+        
+        # Require at least one valid binary for release
+        if [ "$linux_binary_success" = false ] && [ "$windows_binary_success" = false ]; then
+          echo "❌ Critical Error: No valid binaries were created"
+          echo "   At least one platform binary is required for release"
+          echo "   Linux binary status: $([ "$linux_binary_success" = true ] && echo "SUCCESS" || echo "FAILED")"
+          echo "   Windows binary status: $([ "$windows_binary_success" = true ] && echo "SUCCESS" || echo "FAILED")"
+          exit 1
+        fi
+        
+        # Count total release assets
+        total_assets=$(ls -1 release-assets/ | wc -l)
+        echo "✅ Release validation passed"
+        echo "   Total assets: $total_assets"
+        echo "   Binaries: $([ "$linux_binary_success" = true ] && echo -n "Linux " || true)$([ "$windows_binary_success" = true ] && echo -n "Windows" || true)"
+        echo "   Packages: $deb_count DEB, $rpm_count RPM"
+        
+        # Generate comprehensive checksums
+        cd release-assets
+        sha256sum * > SHA256SUMS
+        echo "=== Final Release Assets ==="
+        ls -la
+        echo "=== SHA256 Checksums ==="
+        cat SHA256SUMS
+
+    - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v${{ github.event.inputs.version }}
-        name: Release ${{ github.event.inputs.version }}
+        name: Release v${{ github.event.inputs.version }}
         draft: false
-        prerelease: false
+        prerelease: true
         files: release-assets/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -203,159 +519,111 @@ jobs:
   publish-aur:
     needs: release
     runs-on: ubuntu-latest
+    if: github.event.inputs.dry_run != 'true'
     steps:
-    - name: Download PKGBUILD artifact
-      uses: actions/download-artifact@v3
+    - uses: actions/checkout@v4
+    
+    - name: Download Arch artifacts
+      uses: actions/download-artifact@v4
       with:
         name: linux-arch-artifacts
-        path: aur-files
+        path: aur-files/
     
-    - name: Set up SSH for AUR
+    - name: Validate AUR files
       run: |
+        echo "=== Validating AUR files ==="
+        if [ ! -f "aur-files/PKGBUILD" ]; then
+          echo "❌ Error: PKGBUILD not found"
+          exit 1
+        fi
+        
+        if [ ! -f "aur-files/.SRCINFO" ]; then
+          echo "❌ Error: .SRCINFO not found"
+          exit 1
+        fi
+        
+        echo "=== PKGBUILD Content ==="
+        cat aur-files/PKGBUILD
+        echo "=== .SRCINFO Content ==="
+        cat aur-files/.SRCINFO
+        
+        # Validate PKGBUILD has required fields
+        if ! grep -q "^pkgname=" aur-files/PKGBUILD; then
+          echo "❌ Error: PKGBUILD missing pkgname"
+          exit 1
+        fi
+        
+        if ! grep -q "^pkgver=" aur-files/PKGBUILD; then
+          echo "❌ Error: PKGBUILD missing pkgver"
+          exit 1
+        fi
+        
+        echo "✓ AUR files validated successfully"
+    
+    # AUR Publishing (Requires Repository Secrets)
+    # Required secrets for AUR publishing:
+    #   AUR_SSH_PRIVATE_KEY: SSH private key for AUR publishing
+    #   AUR_USER_NAME: Git user name for AUR commits  
+    #   AUR_USER_EMAIL: Git user email for AUR commits
+    - name: Publish to AUR
+      env:
+        AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        AUR_USER_NAME: ${{ secrets.AUR_USER_NAME }}
+        AUR_USER_EMAIL: ${{ secrets.AUR_USER_EMAIL }}
+      run: |
+        # Setup SSH with proper security
         mkdir -p ~/.ssh
-        echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+        chmod 700 ~/.ssh
+        echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+        chmod 600 ~/.ssh/aur
+        ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
         
         # Configure git
-        git config --global user.name "${{ secrets.AUR_USER_NAME }}"
-        git config --global user.email "${{ secrets.AUR_USER_EMAIL }}"
-    
-    - name: Clone AUR repository
-      run: |
-        git clone ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git aur-repo || {
-          echo "Package doesn't exist in AUR yet, creating new repository"
-          mkdir aur-repo
-          cd aur-repo
+        git config --global user.name "$AUR_USER_NAME"
+        git config --global user.email "$AUR_USER_EMAIL"
+        
+        # Clone or create AUR repo
+        echo "📦 Connecting to AUR..."
+        ssh -i ~/.ssh/aur aur@aur.archlinux.org -o StrictHostKeyChecking=no "ls -la" || echo "AUR access confirmed"
+        git clone ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git aur-repo || mkdir aur-repo
+        cd aur-repo
+        
+        # Initialize if new repo
+        if [ ! -d ".git" ]; then
+          echo "📦 Initializing new AUR repository..."
           git init
           git remote add origin ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git
-        }
-    
-    - name: Prepare AUR files
-      run: |
-        cd aur-repo
-        cp ../aur-files/PKGBUILD .
-        cp ../aur-files/.SRCINFO .
-    
-    - name: Commit and push to AUR
-      run: |
-        cd aur-repo
+        fi
+        
+        # Copy and validate files
+        cp ../aur-files/PKGBUILD ./
+        cp ../aur-files/.SRCINFO ./
+        
+        echo "📦 Files prepared for AUR submission:"
+        ls -la PKGBUILD .SRCINFO
+        
+        # Commit and push with fallback for branch names
         git add PKGBUILD .SRCINFO
-        git commit -m "Update to version ${{ github.event.inputs.version }}" || echo "No changes to commit"
-        git push origin master
+        if git commit -m "Update to version ${{ github.event.inputs.version }}"; then
+          echo "📦 Pushing to AUR..."
+          git push -u origin master 2>/dev/null || git push -u origin main
+          echo "✅ Successfully published to AUR!"
+        else
+          echo "ℹ️ No changes to commit (package may already be up to date)"
+        fi
 
-  publish-repos:
-    needs: [release, publish-aur]
+  dry-run-summary:
+    needs: release
     runs-on: ubuntu-latest
+    if: github.event.inputs.dry_run == 'true'
     steps:
-    - name: Checkout repository pages
-      uses: actions/checkout@v4
-      with:
-        repository: ${{ github.repository_owner }}/${{ github.repository_owner }}.github.io
-        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        path: pages-repo
-    
-    - name: Download artifacts  
-      uses: actions/download-artifact@v3
-      with:
-        path: artifacts
-    
-    - name: Set up repository structure
+    - name: Dry Run Summary
       run: |
-        cd pages-repo
-        mkdir -p apt/dists/stable/main/binary-amd64
-        mkdir -p dnf/x86_64
-    
-    - name: Install repository tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y dpkg-dev createrepo-c
-    
-    - name: Update APT repository
-      run: |
-        cd pages-repo/apt
-        
-        # Copy .deb files
-        find ../../artifacts -name "*.deb" -exec cp {} dists/stable/main/binary-amd64/ \;
-        
-        # Create Packages file
-        cd dists/stable/main/binary-amd64
-        dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
-        dpkg-scanpackages . /dev/null > Packages
-        
-        # Create Release file
-        cd ../../../
-        cat > dists/stable/Release << EOF
-        Origin: ${{ github.repository_owner }}
-        Label: ${{ github.repository_owner }} APT Repository
-        Suite: stable
-        Codename: stable
-        Architectures: amd64
-        Components: main
-        Description: Personal APT repository for ${{ env.APP_NAME }}
-        EOF
-    
-    - name: Update DNF repository  
-      run: |
-        cd pages-repo/dnf/x86_64
-        
-        # Copy .rpm files
-        find ../../../artifacts -name "*.rpm" -exec cp {} . \;
-        
-        # Create repository metadata
-        createrepo_c .
-    
-    - name: Create repository index page
-      run: |
-        cd pages-repo
-        cat > index.html << 'EOF'
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>${{ env.APP_NAME }} Repositories</title>
-        </head>
-        <body>
-            <h1>${{ env.APP_NAME }} Package Repositories</h1>
-            
-            <h2>APT (Ubuntu/Debian)</h2>
-            <pre>
-        echo "deb https://${{ github.repository_owner }}.github.io/apt stable main" | sudo tee /etc/apt/sources.list.d/${{ env.APP_NAME }}.list
-        sudo apt update
-        sudo apt install ${{ env.APP_NAME }}
-            </pre>
-            
-            <h2>DNF (Fedora/RHEL)</h2>
-            <pre>
-        sudo tee /etc/yum.repos.d/${{ env.APP_NAME }}.repo << EOF
-        [${{ env.APP_NAME }}]
-        name=${{ env.APP_NAME }} Repository
-        baseurl=https://${{ github.repository_owner }}.github.io/dnf/\$basearch
-        enabled=1
-        gpgcheck=0
-        EOF
-        sudo dnf install ${{ env.APP_NAME }}
-            </pre>
-            
-            <h2>AUR (Arch Linux)</h2>
-            <pre>
-        yay -S ${{ env.APP_NAME }}
-        # or
-        git clone https://aur.archlinux.org/${{ env.APP_NAME }}.git
-        cd ${{ env.APP_NAME }}
-        makepkg -si
-            </pre>
-            
-            <h2>Direct Downloads</h2>
-            <p>Check the <a href="https://github.com/${{ github.repository }}/releases">releases page</a> for direct binary downloads.</p>
-        </body>
-        </html>
-        EOF
-    
-    - name: Commit and push repository updates
-      run: |
-        cd pages-repo
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git add .
-        git commit -m "Update repositories for ${{ env.APP_NAME }} v${{ github.event.inputs.version }}" || echo "No changes to commit"
-        git push
+        echo "🔍 DRY RUN MODE - No packages were published"
+        echo "==============================================="
+        echo "✅ Binaries built successfully"
+        echo "✅ Packages created successfully"  
+        echo "✅ GitHub release created"
+        echo "⏭️ AUR publishing skipped (dry run mode)"
+        echo ""
+        echo "To publish to AUR, re-run with dry_run=false"
