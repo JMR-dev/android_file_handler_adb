@@ -1,5 +1,5 @@
 [project]
-name = "android-file-handler-adb"
+name = "android_file_handler"
 version = "0.1.0"
 description = "An Android file transfer util for Windows and Linux. MacOS support may be added later."
 authors = [

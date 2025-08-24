@@ -1,0 +1,53 @@
+name: Test Act Environment Detection
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test'
+        required: true
+        default: '0.1.0'
+
+jobs:
+  test-environment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Detect and Configure Environment
+        shell: bash
+        run: |
+          echo "=== Environment Detection Test ==="
+          echo "ACT environment variable: ${ACT:-false}"
+          
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "✅ Act environment detected"
+            echo "ACT_ENVIRONMENT=local" >> $GITHUB_ENV
+            echo "PYTHON_CMD=python3" >> $GITHUB_ENV
+          else
+            echo "✅ GitHub Actions environment detected"
+            echo "ACT_ENVIRONMENT=github" >> $GITHUB_ENV  
+            echo "PYTHON_CMD=python" >> $GITHUB_ENV
+          fi
+          
+          echo "Setting up system Python for Act..."
+          apt-get update -qq
+          apt-get install -y python3 python3-pip curl
+          python3 --version
+          pip3 --version
+      
+      - name: Test Python Setup
+        shell: bash
+        run: |
+          echo "=== Python Test ==="
+          echo "Environment: ${ACT_ENVIRONMENT:-unknown}"
+          echo "Python command: ${PYTHON_CMD:-unknown}"
+          ${{ env.PYTHON_CMD }} --version || python3 --version
+          
+      - name: Test Poetry Installation
+        shell: bash
+        run: |
+          echo "=== Poetry Installation Test ==="
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry --version

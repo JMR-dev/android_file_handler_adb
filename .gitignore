@@ -3,7 +3,10 @@ dist/
 build_temp/
 build
 *.ini
-
+.secrets
+.actrc
+bin/
+test-act.yml
 # Python cache files
 __pycache__/
 *.py[cod]
