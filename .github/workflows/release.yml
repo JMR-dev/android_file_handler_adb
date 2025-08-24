@@ -1,61 +1,361 @@
-# .github/workflows/release.yml
-name: Release
+name: Build and Publish Multi-Platform
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        type: string
+
+env:
+  APP_NAME: yourapp
+  PYTHON_VERSION: "3.12"
 
 jobs:
-  release:
-    runs-on: ${{ matrix.os }}
+  build:
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest, ubuntu-20.04]
         include:
           - os: ubuntu-latest
-            asset_name: android-file-handler-linux
-          - os: windows-latest
-            asset_name: android-file-handler-windows.exe
+            platform: linux-deb
+            binary_name: yourapp
+          - os: windows-latest  
+            platform: windows
+            binary_name: yourapp.exe
+          - os: ubuntu-20.04
+            platform: linux-rpm
+            binary_name: yourapp
+          - os: ubuntu-latest
+            platform: linux-arch
+            binary_name: yourapp
+            container: archlinux:latest
 
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install AppImage dependencies (Linux)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Setup Arch Linux environment
+      if: matrix.platform == 'linux-arch'
       run: |
-        sudo apt update
-        sudo apt install -y fuse libfuse2 curl imagemagick
-        
-    - name: Set up Python
+        pacman -Sy --noconfirm
+        pacman -S --noconfirm python python-pip base-devel git
+        pip install poetry
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      if: matrix.platform != 'linux-arch'
       uses: actions/setup-python@v4
       with:
-        python-version: '3.12'
+        python-version: ${{ env.PYTHON_VERSION }}
     
     - name: Install Poetry
+      if: matrix.platform != 'linux-arch'
       uses: snok/install-poetry@v1
       with:
         version: latest
         virtualenvs-create: true
         virtualenvs-in-project: true
-
-    - name: Install dependencies
-      run: poetry install
-
-    - name: Build AppImage (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      env:
-        CI_CD: true
-      run: |
-        chmod +x scripts/build_AppImage.sh
-        ./scripts/build_AppImage.sh
-
-    - name: Build executable (Windows)
-      if: matrix.os == 'windows-latest'
+    
+    - name: Lock and install dependencies
       run: |
         poetry lock
         poetry install
-        poetry run pyinstaller --onefile src/main.py --distpath dist --name android-file-handler-windows
-      
-    - name: Create Release
+    
+    - name: Build binary with PyInstaller
+      run: |
+        poetry run pip install pyinstaller
+        poetry run pyinstaller --onefile --name ${{ matrix.binary_name }} main.py
+    
+    - name: Install fpm (Ubuntu/Debian)
+      if: matrix.platform == 'linux-deb' || matrix.platform == 'linux-rpm'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm
+        sudo gem install --no-document fpm
+
+    - name: Install package tools (Arch)
+      if: matrix.platform == 'linux-arch'
+      run: |
+        pacman -S --noconfirm base-devel
+    
+    - name: Create .deb package
+      if: matrix.platform == 'linux-deb'
+      run: |
+        mkdir -p package/usr/bin
+        cp dist/${{ matrix.binary_name }} package/usr/bin/
+        fpm -s dir -t deb -n ${{ env.APP_NAME }} -v ${{ github.event.inputs.version }} \
+            --description "Your Python desktop application" \
+            --depends "python3.12" \
+            --maintainer "Your Name <your.email@example.com>" \
+            --url "https://github.com/${{ github.repository }}" \
+            -C package \
+            usr/bin/${{ matrix.binary_name }}=/usr/bin/${{ env.APP_NAME }}
+    
+    - name: Create .rpm package  
+      if: matrix.platform == 'linux-rpm'
+      run: |
+        mkdir -p package/usr/bin
+        cp dist/${{ matrix.binary_name }} package/usr/bin/
+        fpm -s dir -t rpm -n ${{ env.APP_NAME }} -v ${{ github.event.inputs.version }} \
+            --description "Your Python desktop application" \
+            --depends "python3.12" \
+            --maintainer "Your Name <your.email@example.com>" \
+            --url "https://github.com/${{ github.repository }}" \
+            -C package \
+            usr/bin/${{ matrix.binary_name }}=/usr/bin/${{ env.APP_NAME }}
+
+    - name: Create Arch PKGBUILD
+      if: matrix.platform == 'linux-arch'
+      run: |
+        # Create PKGBUILD file for AUR submission
+        cat > PKGBUILD << EOF
+        # Maintainer: Your Name <your.email@example.com>
+        pkgname=${{ env.APP_NAME }}
+        pkgver=${{ github.event.inputs.version }}
+        pkgrel=1
+        pkgdesc="Your Python desktop application"
+        arch=('x86_64')
+        url="https://github.com/${{ github.repository }}"
+        license=('MIT')
+        depends=('python')
+        source=("\$pkgname-\$pkgver::https://github.com/${{ github.repository }}/releases/download/v\$pkgver/${{ env.APP_NAME }}-\$pkgver-linux")
+        sha256sums=('SKIP')  # Will be updated with actual checksums
+        
+        package() {
+            install -Dm755 "\$srcdir/\$pkgname-\$pkgver" "\$pkgdir/usr/bin/\$pkgname"
+        }
+        EOF
+        
+        # Create .SRCINFO file
+        makepkg --printsrcinfo > .SRCINFO
+    
+    - name: Create PKGBUILD for AUR
+      if: matrix.platform == 'linux-deb'
+      run: |
+        cat > PKGBUILD << 'EOF'
+        pkgname=${{ env.APP_NAME }}
+        pkgver=${{ github.event.inputs.version }}
+        pkgrel=1
+        pkgdesc="Your Python desktop application"
+        arch=('x86_64')
+        url="https://github.com/${{ github.repository }}"
+        depends=('python312')
+        source=("$pkgname-$pkgver::https://github.com/${{ github.repository }}/releases/download/v$pkgver/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux")
+        sha256sums=('SKIP')  # You should replace this with actual checksums
+        
+        package() {
+            install -Dm755 "$srcdir/$pkgname-$pkgver" "$pkgdir/usr/bin/$pkgname"
+        }
+        EOF
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.platform }}-artifacts
+        path: |
+          dist/${{ matrix.binary_name }}
+          *.deb
+          *.rpm
+          PKGBUILD
+          .SRCINFO
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+    
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        
+        # Rename binaries for release
+        cp artifacts/linux-deb-artifacts/dist/yourapp release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux
+        cp artifacts/windows-artifacts/dist/yourapp.exe release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-windows.exe
+        
+        # Copy packages
+        find artifacts -name "*.deb" -exec cp {} release-assets/ \;
+        find artifacts -name "*.rpm" -exec cp {} release-assets/ \;
+        find artifacts -name "PKGBUILD" -exec cp {} release-assets/ \;
+        find artifacts -name ".SRCINFO" -exec cp {} release-assets/ \;
+        
+        chmod +x release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux
+    
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/${{ matrix.asset_name }}
-        generate_release_notes: true
+        tag_name: v${{ github.event.inputs.version }}
+        name: Release ${{ github.event.inputs.version }}
+        draft: false
+        prerelease: false
+        files: release-assets/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-aur:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download PKGBUILD artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: linux-arch-artifacts
+        path: aur-files
+    
+    - name: Set up SSH for AUR
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+        
+        # Configure git
+        git config --global user.name "${{ secrets.AUR_USER_NAME }}"
+        git config --global user.email "${{ secrets.AUR_USER_EMAIL }}"
+    
+    - name: Clone AUR repository
+      run: |
+        git clone ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git aur-repo || {
+          echo "Package doesn't exist in AUR yet, creating new repository"
+          mkdir aur-repo
+          cd aur-repo
+          git init
+          git remote add origin ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git
+        }
+    
+    - name: Prepare AUR files
+      run: |
+        cd aur-repo
+        cp ../aur-files/PKGBUILD .
+        cp ../aur-files/.SRCINFO .
+    
+    - name: Commit and push to AUR
+      run: |
+        cd aur-repo
+        git add PKGBUILD .SRCINFO
+        git commit -m "Update to version ${{ github.event.inputs.version }}" || echo "No changes to commit"
+        git push origin master
+
+  publish-repos:
+    needs: [release, publish-aur]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository pages
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository_owner }}/${{ github.repository_owner }}.github.io
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        path: pages-repo
+    
+    - name: Download artifacts  
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+    
+    - name: Set up repository structure
+      run: |
+        cd pages-repo
+        mkdir -p apt/dists/stable/main/binary-amd64
+        mkdir -p dnf/x86_64
+    
+    - name: Install repository tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y dpkg-dev createrepo-c
+    
+    - name: Update APT repository
+      run: |
+        cd pages-repo/apt
+        
+        # Copy .deb files
+        find ../../artifacts -name "*.deb" -exec cp {} dists/stable/main/binary-amd64/ \;
+        
+        # Create Packages file
+        cd dists/stable/main/binary-amd64
+        dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
+        dpkg-scanpackages . /dev/null > Packages
+        
+        # Create Release file
+        cd ../../../
+        cat > dists/stable/Release << EOF
+        Origin: ${{ github.repository_owner }}
+        Label: ${{ github.repository_owner }} APT Repository
+        Suite: stable
+        Codename: stable
+        Architectures: amd64
+        Components: main
+        Description: Personal APT repository for ${{ env.APP_NAME }}
+        EOF
+    
+    - name: Update DNF repository  
+      run: |
+        cd pages-repo/dnf/x86_64
+        
+        # Copy .rpm files
+        find ../../../artifacts -name "*.rpm" -exec cp {} . \;
+        
+        # Create repository metadata
+        createrepo_c .
+    
+    - name: Create repository index page
+      run: |
+        cd pages-repo
+        cat > index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>${{ env.APP_NAME }} Repositories</title>
+        </head>
+        <body>
+            <h1>${{ env.APP_NAME }} Package Repositories</h1>
+            
+            <h2>APT (Ubuntu/Debian)</h2>
+            <pre>
+        echo "deb https://${{ github.repository_owner }}.github.io/apt stable main" | sudo tee /etc/apt/sources.list.d/${{ env.APP_NAME }}.list
+        sudo apt update
+        sudo apt install ${{ env.APP_NAME }}
+            </pre>
+            
+            <h2>DNF (Fedora/RHEL)</h2>
+            <pre>
+        sudo tee /etc/yum.repos.d/${{ env.APP_NAME }}.repo << EOF
+        [${{ env.APP_NAME }}]
+        name=${{ env.APP_NAME }} Repository
+        baseurl=https://${{ github.repository_owner }}.github.io/dnf/\$basearch
+        enabled=1
+        gpgcheck=0
+        EOF
+        sudo dnf install ${{ env.APP_NAME }}
+            </pre>
+            
+            <h2>AUR (Arch Linux)</h2>
+            <pre>
+        yay -S ${{ env.APP_NAME }}
+        # or
+        git clone https://aur.archlinux.org/${{ env.APP_NAME }}.git
+        cd ${{ env.APP_NAME }}
+        makepkg -si
+            </pre>
+            
+            <h2>Direct Downloads</h2>
+            <p>Check the <a href="https://github.com/${{ github.repository }}/releases">releases page</a> for direct binary downloads.</p>
+        </body>
+        </html>
+        EOF
+    
+    - name: Commit and push repository updates
+      run: |
+        cd pages-repo
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add .
+        git commit -m "Update repositories for ${{ env.APP_NAME }} v${{ github.event.inputs.version }}" || echo "No changes to commit"
+        git push

@@ -25,16 +25,8 @@ def get_executable_directory() -> str:
         return os.path.dirname(os.path.abspath(__file__))
 
 def get_platform_tools_directory() -> str:
-    """Get platform-tools directory with executable and AppImage support."""
+    """Get platform-tools directory."""
     base_dir = get_executable_directory()
-    
-    # For AppImages running from temporary mounts, use persistent storage
-    if sys.platform.startswith('linux') and ('tmp' in base_dir and '.mount_' in base_dir):
-        # AppImage temporary mount - use persistent user directory
-        home_dir = os.path.expanduser("~")
-        persistent_dir = os.path.join(home_dir, ".android-file-handler", "platform-tools")
-        os.makedirs(os.path.dirname(persistent_dir), exist_ok=True)
-        return persistent_dir
     
     # Check if we're in development mode (running from src/ directory)
     if not getattr(sys, 'frozen', False):
