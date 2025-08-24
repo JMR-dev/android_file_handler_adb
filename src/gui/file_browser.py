@@ -1,6 +1,6 @@
 """
 Windows Android Browser Module
-Provides Android filesystem browsing capabilities for Windows using ADB.
+Provides Android filesystem browsing capabilities for Windows and Linux using ADB.
 """
 
 import threading
