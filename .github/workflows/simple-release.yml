@@ -180,7 +180,7 @@ jobs:
 
     
   create-release:
-    needs: [build-windows, build-debian, build-arch, build-rocky]
+    needs: [build-windows, build-debian, build-arch]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -205,7 +205,7 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
   # build-rocky:
   #   runs-on: ubuntu-latest
   #   container:
