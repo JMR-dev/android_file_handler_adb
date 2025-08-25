@@ -18,8 +18,6 @@ permissions:
 env:
   # change this if you prefer a different pinned fpm version
   FPM_VERSION: "1.16.0"
-  # SSH private key for GitHub operations (populate in repository secrets)
-  CI_CD_GH_SSH_KEY: ${{ secrets.CI_CD_GH_SSH_KEY }}
   # Personal Access Token for HTTPS git operations (populate in repository secrets)
   CI_CD_PAT: ${{ secrets.CI_CD_PAT }}
 
@@ -256,7 +254,11 @@ jobs:
           if [ -n "${CI_CD_PAT:-}" ]; then
             echo "Configuring git to use CI_CD_PAT for HTTPS operations"
             # Create Authorization header: Basic base64(:PAT)
-            EXTRA_HEADER="AUTHORIZATION: basic $(printf ':%s' "${CI_CD_PAT}" | base64)"
+            EXTRA_HEADER="Authorization: Basic $(printf ':%s' "${CI_CD_PAT}" | base64)"
+            # set globally so git (and subprocesses) honor it for the duration of the job
+            git config --global http.extraHeader "${EXTRA_HEADER}"
+            # Prevent git from trying to prompt for credentials interactively
+            export GIT_TERMINAL_PROMPT=0
           fi
 
           gitx() {
