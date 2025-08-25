@@ -137,26 +137,38 @@ jobs:
           poetry install
           poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
 
-      - name: Install fpm (gem) and package pacman
+      - name: Install fpm (system ruby) and package pacman
         run: |
-          # install fpm (gem)
-          gem install --no-document fpm
+            set -euo pipefail
 
-          # compute user gem bin dir dynamically (avoids hardcoding ruby version)
-          GEM_BIN="$(ruby -e 'print Gem.user_dir')/bin"
+            # Update package DB and install ruby and build tools
+            pacman -Syu --noconfirm
+            pacman -S --noconfirm ruby base-devel
 
-          echo "User gem bin: $GEM_BIN"
+            # Install fpm system-wide (Actions container runs as root)
+            gem install --no-document fpm
 
-          # add Poetry user bin (common) and Ruby gem bin to PATH for subsequent steps
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "$GEM_BIN" >> $GITHUB_PATH
+            # Sanity checks
+            echo "ruby version: $(ruby -v)"
+            echo "gem env:"
+            gem env
 
-          # make available immediately in this step too (optional)
-          export PATH="$HOME/.local/bin:$GEM_BIN:$PATH"
-          VERSION="$(poetry version -s)"
-          mkdir -p dist
-          chmod +x dist/android-file-handler
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
+            # Ensure system gem bin dir is on PATH for subsequent steps (usually /usr/local/bin)
+            echo "/usr/local/bin" >> $GITHUB_PATH
+
+            # Verify fpm is available
+            if ! command -v fpm >/dev/null 2>&1; then
+            echo "fpm not found on PATH; gem installation may have gone to user dir. Diagnostics:"
+            ruby -e "puts Gem.user_dir"
+            ls -la "$(ruby -e 'print Gem.user_dir')/bin" || true
+            exit 1
+            fi
+
+            # Package with fpm
+            VERSION="$(poetry version -s)"
+            mkdir -p dist
+            chmod +x dist/android-file-handler
+            fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
@@ -175,7 +187,7 @@ jobs:
           dnf config-manager --set-enabled crb
           dnf -y update
           dnf -y install git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
-            readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch ruby ruby-devel rubygems rpm-build
+              readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch ruby ruby-devel rubygems rpm-build
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -186,21 +198,13 @@ jobs:
         run: |
           export PYENV_ROOT="$HOME/.pyenv"
           export PATH="$PYENV_ROOT/bin:$PATH"
-          if [ -d "$PYENV_ROOT/.git" ]; then
-            cd "$PYENV_ROOT"
-            git fetch --all --prune
-            git reset --hard origin/master || true
-            cd -
-          else
-            git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
-          fi
           if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
-            cd "$PYENV_ROOT/plugins/python-build"
-            git fetch --all --prune
-            git reset --hard origin/master || true
-            cd -
+              cd "$PYENV_ROOT/plugins/python-build"
+              git fetch --all --prune
+              git reset --hard origin/master || true
+              cd -
           else
-            git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
+              git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
           fi
           echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
           echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
