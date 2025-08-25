@@ -135,7 +135,7 @@ jobs:
       - name: Install system dependencies
         run: |
           dnf update -y
-          dnf install -y curl git gcc gcc-c++ make
+          dnf install -y git gcc gcc-c++ make
 
       - name: Checkout code
         uses: actions/checkout@v4
