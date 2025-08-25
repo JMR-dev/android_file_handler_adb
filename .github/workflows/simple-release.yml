@@ -1,7 +1,10 @@
 name: Build Multi-Platform Binaries
 
 on:
-  workflow_dispatch:  # Manual trigger only
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -25,14 +28,8 @@ jobs:
       - name: Ensure Poetry is on PATH (Windows)
         shell: pwsh
         run: |
-          # Add the typical Poetry installer location to PATH for subsequent steps.
-          # This writes the directory to GITHUB_PATH so it is appended to PATH automatically.
           $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
-          Write-Output "Adding $poetryPath to PATH via GITHUB_PATH"
           Write-Output $poetryPath >> $Env:GITHUB_PATH
-          # Confirm it's on PATH for this step (diagnostics only)
-          Write-Output "PATH is now: $env:PATH"
-          Get-Command -ErrorAction SilentlyContinue poetry | ForEach-Object { Write-Output "poetry location: $($_.Source)" } || Write-Output "poetry not found yet (will be available in subsequent steps)"
 
       - name: Install dependencies
         run: |
@@ -56,7 +53,8 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y curl git build-essential
+          apt-get install -y curl git build-essential ruby ruby-dev gcc make build-essential zlib1g-dev
+          gem install --no-document fpm
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -67,134 +65,6 @@ jobs:
           python-version: '3.12'
 
       - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python -
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
-
-      - name: Configure Poetry
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-
-      - name: Install dependencies
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry env use python3.12 || true
-          poetry install
-
-      - name: Build Debian executable
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
-
-      - name: Upload Debian artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: debian-binary
-          path: dist/android-file-handler
-
-  build-arch:
-    runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-    steps:
-      - name: Install system dependencies
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm python python-pip curl git base-devel
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python -
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
-
-      - name: Configure Poetry
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-
-      - name: Install dependencies
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry install
-
-      - name: Build Arch executable
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
-
-      - name: Upload Arch artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: arch-binary
-          path: dist/android-file-handler
-
-  build-rocky:
-    runs-on: ubuntu-latest
-    container:
-      image: rockylinux:9
-    steps:
-      - name: Install system build dependencies for Python and pyenv (enable CRB for -devel packages)
-        run: |
-          # enable the CodeReady Builder (CRB) repository so -devel packages (like gdbm-devel) are available
-          dnf -y install dnf-plugins-core
-          dnf config-manager --set-enabled crb
-
-          # Refresh metadata and install the packages required to build CPython from source
-          dnf -y update
-          dnf -y install git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
-            readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install pyenv and build Python 3.12.11 (native to Rocky) — idempotent
-        env:
-          PYENV_ROOT: ${{ github.workspace }}/.pyenv_temp
-        run: |
-          # Use $HOME/.pyenv for the pyenv installation (runtime only — this will NOT change your repo files)
-          export PYENV_ROOT="$HOME/.pyenv"
-          export PATH="$PYENV_ROOT/bin:$PATH"
-
-          # Clone or update pyenv (idempotent)
-          if [ -d "$PYENV_ROOT/.git" ]; then
-            echo "pyenv already exists — updating"
-            cd "$PYENV_ROOT"
-            git fetch --all --prune
-            git reset --hard origin/master || true
-            cd -
-          else
-            echo "Cloning pyenv"
-            git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
-          fi
-
-          # Persist pyenv environment for subsequent steps
-          echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
-          echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
-
-          # Initialize pyenv for this step and ensure pyenv is usable immediately
-          export PATH="$PYENV_ROOT/bin:$PATH"
-          eval "$($PYENV_ROOT/bin/pyenv init -)"
-
-          # Install the specified Python version if not already installed (-s = skip if present)
-          $PYENV_ROOT/bin/pyenv install -s 3.12.11
-          $PYENV_ROOT/bin/pyenv global 3.12.11
-
-          # Verify installed python
-          python --version
-          pip --version
-
-      - name: Install Poetry (use action; Poetry will use the pyenv-built python)
         uses: snok/install-poetry@v1
         with:
           version: latest
@@ -208,23 +78,160 @@ jobs:
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
 
-      - name: Install dependencies
+      - name: Install dependencies & build executable
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          # ensure poetry uses the pyenv python
-          poetry env use 3.12.11 || true
+          poetry env use python3.12 || true
           poetry install
-
-      - name: Build Rocky executable
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
           poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
 
-      - name: Upload Rocky artifact
+      - name: Package .deb (fpm)
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          VERSION="$(poetry version -s)"
+          mkdir -p dist
+          chmod +x dist/android-file-handler
+          fpm -s dir -t deb -n android-file-handler -v "$VERSION" --architecture amd64 --prefix /usr/local/bin -p "dist/android-file-handler_${VERSION}_amd64.deb" dist/android-file-handler
+
+      - name: Upload Debian .deb
         uses: actions/upload-artifact@v4
         with:
-          name: rocky-binary
-          path: dist/android-file-handler
+          name: debian-package
+          path: dist/*.deb
+
+  build-arch:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install system dependencies (Arch)
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm python python-pip curl git base-devel ruby
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Configure Poetry
+        run: |
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies & build executable
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry install
+          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
+
+      - name: Install fpm (gem) and package pacman
+        run: |
+          gem install --no-document fpm
+          VERSION="$(poetry version -s)"
+          mkdir -p dist
+          chmod +x dist/android-file-handler
+          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.*
+
+  build-rocky:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:9
+    steps:
+      - name: Install system build dependencies for Python and pyenv (enable CRB for -devel pkgs)
+        run: |
+          dnf -y install dnf-plugins-core
+          dnf config-manager --set-enabled crb
+          dnf -y update
+          dnf -y install git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
+            readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch ruby ruby-devel rubygems rpm-build
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pyenv and build Python 3.12.11 (idempotent)
+        env:
+          PYENV_ROOT: ${{ github.workspace }}/.pyenv_temp
+        run: |
+          export PYENV_ROOT="$HOME/.pyenv"
+          export PATH="$PYENV_ROOT/bin:$PATH"
+          if [ -d "$PYENV_ROOT/.git" ]; then
+            cd "$PYENV_ROOT"
+            git fetch --all --prune
+            git reset --hard origin/master || true
+            cd -
+          else
+            git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
+          fi
+          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
+            cd "$PYENV_ROOT/plugins/python-build"
+            git fetch --all --prune
+            git reset --hard origin/master || true
+            cd -
+          else
+            git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
+          fi
+          echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
+          echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
+          export PATH="$PYENV_ROOT/bin:$PATH"
+          eval "$($PYENV_ROOT/bin/pyenv init -)"
+          $PYENV_ROOT/bin/pyenv install -s 3.12.11
+          $PYENV_ROOT/bin/pyenv global 3.12.11
+          python --version
+          pip --version
+
+      - name: Install Poetry (use action)
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Configure Poetry
+        run: |
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies & build executable
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry env use 3.12.11 || true
+          poetry install
+          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
+
+      - name: Install fpm (gem) and package .rpm
+        run: |
+          gem install --no-document fpm
+          VERSION="$(poetry version -s)"
+          mkdir -p dist
+          chmod +x dist/android-file-handler
+          fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1.x86_64.rpm" dist/android-file-handler
+
+      - name: Upload Rocky RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocky-package
+          path: dist/*.rpm
 
   create-release:
     needs: [build-windows, build-debian, build-arch, build-rocky]
@@ -241,7 +248,9 @@ jobs:
         with:
           files: |
             ./binaries/android-file-handler.exe
-            ./binaries/android-file-handler
+            ./binaries/android-file-handler_*.deb
+            ./binaries/android-file-handler-*.rpm
+            ./binaries/android-file-handler-*-x86_64.pkg.tar.*
           draft: false
           prerelease: false
         env:
