@@ -183,6 +183,16 @@ jobs:
     needs: [build-windows, build-debian, build-arch]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        
+      - name: Get version
+        id: version
+        run: echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -196,6 +206,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
           files: |
             ./binaries/android-file-handler.exe
             ./binaries/android-file-handler_*.deb
