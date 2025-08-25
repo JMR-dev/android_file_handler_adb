@@ -229,17 +229,9 @@ jobs:
           set -euo pipefail
 
           export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
-
-           # Remove any leftover pyenv directories that block installation
-          if [ -d "$PYENV_ROOT" ]; then
-            echo "Removing existing workspace pyenv: $PYENV_ROOT"
-            rm -rf "$PYENV_ROOT"
-          fi
-
-          if [ -d "$HOME/.pyenv" ]; then
-            echo "Removing existing home pyenv: $HOME/.pyenv"
-            rm -rf "$HOME/.pyenv"
-          fi
+          
+          echo "Removing existing home pyenv: $HOME/.pyenv"
+          rm -rf ~/.pyenv"
 
           mkdir -p "$PYENV_ROOT"
 
