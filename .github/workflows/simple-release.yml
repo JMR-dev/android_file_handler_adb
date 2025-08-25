@@ -255,7 +255,7 @@ jobs:
 
           # Use HTTPS clones and a repository PAT when available
           REPO_PYENV="https://github.com/pyenv/pyenv.git"
-          REPO_BUILD="https://github.com/pyenv/pyenv-build.git"
+          REPO_BUILD="https://github.com/pyenv/python-build.git"
 
           EXTRA_HEADER=""
           if [ -n "${CI_CD_PAT:-}" ]; then
