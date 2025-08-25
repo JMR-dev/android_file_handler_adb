@@ -315,15 +315,15 @@ jobs:
   #         echo "Downloaded files:"
   #         ls -la ./binaries || true
 
-  #     - name: Create Release
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         files: |
-  #           ./binaries/android-file-handler.exe
-  #           ./binaries/android-file-handler_*.deb
-  #           ./binaries/android-file-handler-*.rpm
-  #           ./binaries/android-file-handler-*-x86_64.pkg.tar.*
-  #         draft: false
-  #         prerelease: false
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./binaries/android-file-handler.exe
+            ./binaries/android-file-handler_*.deb
+            ./binaries/android-file-handler-*.rpm
+            ./binaries/android-file-handler-*-x86_64.pkg.tar.*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
