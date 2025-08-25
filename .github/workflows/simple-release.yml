@@ -218,45 +218,32 @@ jobs:
 
       - name: Clean up pyenv
         run: |
-                echo "Removing existing pyenv installations"
-                rm -rf "${GITHUB_WORKSPACE}/.pyenv"
-                rm -rf "${HOME}/.pyenv"
-                        
+          echo "Removing existing pyenv installations"
+          rm -rf "${GITHUB_WORKSPACE}/.pyenv"
+          rm -rf "${HOME}/.pyenv"
+
       - name: Tarball-based pyenv + python-build (non-interactive)
-        id: pyenv_tarball
+        env:
+          PYENV_ROOT: ${{ github.workspace }}/.pyenv  # Set this BEFORE running installer
         run: |
           set -euo pipefail
-
           
-          
-          export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
+          echo "PYENV_ROOT is set to: $PYENV_ROOT"
           mkdir -p "$PYENV_ROOT"
-
+          
           echo "Downloading pyenv installer and running it"
-
-          wget -qO /tmp/pyenv_install.sh https://pyenv.run
-          chmod +x /tmp/pyenv_install.sh
-          bash /tmp/pyenv_install.sh
-
-          # If installer wrote to $HOME/.pyenv, move it into the workspace
-          if [ -d "$HOME/.pyenv" ] && [ ! -d "$PYENV_ROOT" ]; then
-            mv "$HOME/.pyenv" "$PYENV_ROOT"
-          fi
-
+          wget -qO- https://pyenv.run | bash
+          
           # Initialize pyenv environment for this job
           export PATH="$PYENV_ROOT/bin:$PATH"
           eval "$($PYENV_ROOT/bin/pyenv init -)"
-
+          
           # Persist environment variables for subsequent steps
           echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
           echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
-
+          
           echo "pyenv version:"
           "$PYENV_ROOT/bin/pyenv" --version || true
-          # Verify pyenv can list installed/available versions (small, non-fatal smoke test)
-          "$PYENV_ROOT/bin/pyenv" versions --bare | head -n 5 || true
-          echo "python-build plugin at: $PYENV_ROOT/plugins/python-build"
-          ls -la "$PYENV_ROOT/plugins/python-build" || true
 
       - name: Build Python with pyenv (3.12.11) and set global
         env:
