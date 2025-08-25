@@ -132,10 +132,11 @@ jobs:
     container:
       image: rockylinux:9
     steps:
-      - name: Install system dependencies
+      - name: Install system dependencies (avoid curl to prevent curl-minimal conflict)
         run: |
-          dnf update -y
-          dnf install -y curl git gcc gcc-c++ make
+          dnf -y update
+          # omit installing curl to avoid conflicts with curl-minimal
+          dnf -y install git gcc gcc-c++ make
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -146,12 +147,15 @@ jobs:
           python-version: '3.12'
 
       - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python -
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
 
       - name: Configure Poetry
         run: |
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
           export PATH="$HOME/.local/bin:$PATH"
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
