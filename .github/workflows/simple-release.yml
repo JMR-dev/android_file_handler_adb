@@ -177,153 +177,153 @@ jobs:
           name: arch-package
           path: dist/*.pkg.tar.*
 
-  build-rocky:
-    runs-on: ubuntu-latest
-    container:
-      image: rockylinux:9
-    steps:
-      - name: Robust dnf setup and install build deps (retry-clean-refresh)
-        run: |
-          set -euo pipefail
-          retry() {
-            local max_tries=5
-            local sleep_base=3
-            local n=1
-            until "$@"; do
-              if [ $n -ge $max_tries ]; then
-                echo "Command failed after $n attempts: $*"
-                return 1
-              fi
-              echo "Command failed: $*. Retrying ($n/$max_tries) after $((sleep_base * n))s..."
-              sleep $((sleep_base * n))
-              n=$((n + 1))
-            done
-            return 0
-          }
+  # build-rocky:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: rockylinux:9
+  #   steps:
+  #     - name: Robust dnf setup and install build deps (retry-clean-refresh)
+  #       run: |
+  #         set -euo pipefail
+  #         retry() {
+  #           local max_tries=5
+  #           local sleep_base=3
+  #           local n=1
+  #           until "$@"; do
+  #             if [ $n -ge $max_tries ]; then
+  #               echo "Command failed after $n attempts: $*"
+  #               return 1
+  #             fi
+  #             echo "Command failed: $*. Retrying ($n/$max_tries) after $((sleep_base * n))s..."
+  #             sleep $((sleep_base * n))
+  #             n=$((n + 1))
+  #           done
+  #           return 0
+  #         }
 
-          # Ensure plugin and enable CRB
-          retry dnf -y install dnf-plugins-core
-          retry dnf config-manager --set-enabled crb || true
+  #         # Ensure plugin and enable CRB
+  #         retry dnf -y install dnf-plugins-core
+  #         retry dnf config-manager --set-enabled crb || true
 
-          # Clean caches and refresh metadata
-          retry dnf -y clean all
-          rm -rf /var/cache/dnf || true
-          retry dnf -y makecache --refresh
+  #         # Clean caches and refresh metadata
+  #         retry dnf -y clean all
+  #         rm -rf /var/cache/dnf || true
+  #         retry dnf -y makecache --refresh
 
-          # Install build-time deps including ruby so gem stdlib is present
-          retry dnf -y install -y \
-            git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
-            readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
-            ruby ruby-devel rubygems rpm-build tar ca-certificates wget
+  #         # Install build-time deps including ruby so gem stdlib is present
+  #         retry dnf -y install -y \
+  #           git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
+  #           readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
+  #           ruby ruby-devel rubygems rpm-build tar ca-certificates wget
 
-      - name: Clean up pyenv
-        run: |
-          echo "Removing existing pyenv installations"
-          rm -rf "${GITHUB_WORKSPACE}/.pyenv"
-          rm -rf "${HOME}/.pyenv"
+  #     - name: Clean up pyenv
+  #       run: |
+  #         echo "Removing existing pyenv installations"
+  #         rm -rf "${GITHUB_WORKSPACE}/.pyenv"
+  #         rm -rf "${HOME}/.pyenv"
 
-      - name: Tarball-based pyenv + python-build (non-interactive)
-        env:
-          PYENV_ROOT: ${{ github.workspace }}/.pyenv  # Set this BEFORE running installer
-        run: |
-          set -euo pipefail
+  #     - name: Tarball-based pyenv + python-build (non-interactive)
+  #       env:
+  #         PYENV_ROOT: ${{ github.workspace }}/.pyenv  # Set this BEFORE running installer
+  #       run: |
+  #         set -euo pipefail
           
-          echo "PYENV_ROOT is set to: $PYENV_ROOT"
-          mkdir -p "$PYENV_ROOT"
+  #         echo "PYENV_ROOT is set to: $PYENV_ROOT"
+  #         mkdir -p "$PYENV_ROOT"
           
-          echo "Downloading pyenv installer and running it"
-          wget -qO- https://pyenv.run | bash
+  #         echo "Downloading pyenv installer and running it"
+  #         wget -qO- https://pyenv.run | bash
           
-          # Initialize pyenv environment for this job
-          export PATH="$PYENV_ROOT/bin:$PATH"
-          eval "$($PYENV_ROOT/bin/pyenv init -)"
+  #         # Initialize pyenv environment for this job
+  #         export PATH="$PYENV_ROOT/bin:$PATH"
+  #         eval "$($PYENV_ROOT/bin/pyenv init -)"
           
-          # Persist environment variables for subsequent steps
-          echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
-          echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
+  #         # Persist environment variables for subsequent steps
+  #         echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
+  #         echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
           
-          echo "pyenv version:"
-          "$PYENV_ROOT/bin/pyenv" --version || true
+  #         echo "pyenv version:"
+  #         "$PYENV_ROOT/bin/pyenv" --version || true
 
-      - name: Build Python with pyenv (3.12.11) and set global
-        env:
-          PYENV_ROOT: ${{ github.workspace }}/.pyenv
-        run: |
-          set -euo pipefail
-          export PYENV_ROOT="${PYENV_ROOT}"
-          export PATH="$PYENV_ROOT/bin:$PATH"
-          eval "$($PYENV_ROOT/bin/pyenv init -)"
-          # Install python (idempotent)
-          $PYENV_ROOT/bin/pyenv install -s 3.12.11
-          $PYENV_ROOT/bin/pyenv global 3.12.11
-          python --version
-          pip --version
+  #     - name: Build Python with pyenv (3.12.11) and set global
+  #       env:
+  #         PYENV_ROOT: ${{ github.workspace }}/.pyenv
+  #       run: |
+  #         set -euo pipefail
+  #         export PYENV_ROOT="${PYENV_ROOT}"
+  #         export PATH="$PYENV_ROOT/bin:$PATH"
+  #         eval "$($PYENV_ROOT/bin/pyenv init -)"
+  #         # Install python (idempotent)
+  #         $PYENV_ROOT/bin/pyenv install -s 3.12.11
+  #         $PYENV_ROOT/bin/pyenv global 3.12.11
+  #         python --version
+  #         pip --version
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: latest
-          virtualenvs-create: true
-          virtualenvs-in-project: true
+  #     - name: Install Poetry
+  #       uses: snok/install-poetry@v1
+  #       with:
+  #         version: latest
+  #         virtualenvs-create: true
+  #         virtualenvs-in-project: true
 
-      - name: Configure Poetry
-        run: |
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
+  #     - name: Configure Poetry
+  #       run: |
+  #         echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+  #         export PATH="$HOME/.local/bin:$PATH"
+  #         poetry config virtualenvs.create true
+  #         poetry config virtualenvs.in-project true
 
-      - name: Install dependencies & build executable
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
-          poetry env use 3.12.11 || true
-          poetry install
-          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
+  #     - name: Install dependencies & build executable
+  #       run: |
+  #         set -euo pipefail
+  #         export PATH="$HOME/.local/bin:$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
+  #         poetry env use 3.12.11 || true
+  #         poetry install
+  #         poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
 
-      - name: Install fpm and package .rpm
-        run: |
-          set -euo pipefail
-          # install pinned fpm and ensure binary is in system bindir
-          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/local/bin
-          echo "/usr/local/bin" >> $GITHUB_PATH
+  #     - name: Install fpm and package .rpm
+  #       run: |
+  #         set -euo pipefail
+  #         # install pinned fpm and ensure binary is in system bindir
+  #         gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/local/bin
+  #         echo "/usr/local/bin" >> $GITHUB_PATH
 
-          # Build rpm with explicit filename
-          VERSION="$(poetry version -s)"
-          mkdir -p dist
-          chmod +x dist/android-file-handler
-          fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1.x86_64.rpm" dist/android-file-handler
+  #         # Build rpm with explicit filename
+  #         VERSION="$(poetry version -s)"
+  #         mkdir -p dist
+  #         chmod +x dist/android-file-handler
+  #         fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1.x86_64.rpm" dist/android-file-handler
 
-      - name: Upload Rocky RPM
-        uses: actions/upload-artifact@v4
-        with:
-          name: rocky-package
-          path: dist/*.rpm
+  #     - name: Upload Rocky RPM
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: rocky-package
+  #         path: dist/*.rpm
 
-  create-release:
-    needs: [build-windows, build-debian, build-arch, build-rocky]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: ./binaries
+  # create-release:
+  #   needs: [build-windows, build-debian, build-arch, build-rocky]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Download all artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         merge-multiple: true
+  #         path: ./binaries
 
-      - name: List downloaded binaries (debug)
-        run: |
-          echo "Downloaded files:"
-          ls -la ./binaries || true
+  #     - name: List downloaded binaries (debug)
+  #       run: |
+  #         echo "Downloaded files:"
+  #         ls -la ./binaries || true
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            ./binaries/android-file-handler.exe
-            ./binaries/android-file-handler_*.deb
-            ./binaries/android-file-handler-*.rpm
-            ./binaries/android-file-handler-*-x86_64.pkg.tar.*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Create Release
+  #       uses: softprops/action-gh-release@v1
+  #       with:
+  #         files: |
+  #           ./binaries/android-file-handler.exe
+  #           ./binaries/android-file-handler_*.deb
+  #           ./binaries/android-file-handler-*.rpm
+  #           ./binaries/android-file-handler-*-x86_64.pkg.tar.*
+  #         draft: false
+  #         prerelease: false
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
