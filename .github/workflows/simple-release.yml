@@ -132,9 +132,13 @@ jobs:
     container:
       image: rockylinux:9
     steps:
-      - name: Install system build dependencies for Python and pyenv
+      - name: Install system build dependencies for Python and pyenv (enable CRB for -devel packages)
         run: |
-          # update metadata and install packages required to build CPython from source
+          # enable the CodeReady Builder (CRB) repository so -devel packages (like gdbm-devel) are available
+          dnf -y install dnf-plugins-core
+          dnf config-manager --set-enabled crb
+
+          # Refresh metadata and install the packages required to build CPython from source
           dnf -y update
           dnf -y install git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
             readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch
@@ -146,7 +150,7 @@ jobs:
         env:
           PYENV_ROOT: ${{ github.workspace }}/.pyenv_temp
         run: |
-          # Use $HOME/.pyenv so we don't touch repository files; we will record the path via GITHUB_ENV
+          # Use $HOME/.pyenv so we don't touch repository files
           export PYENV_ROOT="$HOME/.pyenv"
           export PATH="$PYENV_ROOT/bin:$PATH"
 
@@ -156,15 +160,14 @@ jobs:
 
           # Persist pyenv environment for subsequent steps
           echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
-          # prepend shims/bin to PATH so pyenv shims are available in later steps
           echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
 
-          # Provide basic pyenv init for this step so we can run the pyenv binary immediately
+          # Initialize pyenv for this step
           export PYENV_ROOT="$HOME/.pyenv"
           export PATH="$PYENV_ROOT/bin:$PATH"
           eval "$($PYENV_ROOT/bin/pyenv init -)"
 
-          # Build and install specific Python version (specify the exact patch for reproducibility)
+          # Build and install specific Python version (specify exact patch for reproducibility)
           $PYENV_ROOT/bin/pyenv install -v 3.12.11
           $PYENV_ROOT/bin/pyenv global 3.12.11
 
