@@ -139,7 +139,20 @@ jobs:
 
       - name: Install fpm (gem) and package pacman
         run: |
+          # install fpm (gem)
           gem install --no-document fpm
+
+          # compute user gem bin dir dynamically (avoids hardcoding ruby version)
+          GEM_BIN="$(ruby -e 'print Gem.user_dir')/bin"
+
+          echo "User gem bin: $GEM_BIN"
+
+          # add Poetry user bin (common) and Ruby gem bin to PATH for subsequent steps
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$GEM_BIN" >> $GITHUB_PATH
+
+          # make available immediately in this step too (optional)
+          export PATH="$HOME/.local/bin:$GEM_BIN:$PATH"
           VERSION="$(poetry version -s)"
           mkdir -p dist
           chmod +x dist/android-file-handler
