@@ -216,14 +216,17 @@ jobs:
             readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
             ruby ruby-devel rubygems rpm-build tar ca-certificates wget
 
+      - name: Clean up pyenv
+        run: |
+              echo "Removing existing home pyenv"
+              rm -rf /__w/android_file_handler_adb/android_file_handler_adb/.pyenv
+            
       - name: Tarball-based pyenv + python-build (non-interactive)
         id: pyenv_tarball
         run: |
           set -euo pipefail
 
           
-          echo "Removing existing home pyenv: $HOME/.pyenv"
-          rm -rf /__w/android_file_handler_adb/android_file_handler_adb/.pyenv
           
           export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
           mkdir -p "$PYENV_ROOT"
