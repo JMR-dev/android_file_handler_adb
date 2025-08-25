@@ -170,12 +170,12 @@ jobs:
           chmod +x dist/android-file-handler
           # explicit filename into dist/
           fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
-          
-          - name: Upload Arch package
-          uses: actions/upload-artifact@v4
-          with:
-            name: arch-package
-            path: dist/*.pkg.tar.*
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.*
 
 
     
