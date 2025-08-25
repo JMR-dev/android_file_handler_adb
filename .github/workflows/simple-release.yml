@@ -231,7 +231,7 @@ jobs:
           export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
           
           echo "Removing existing home pyenv: $HOME/.pyenv"
-          rm -rf ~/.pyenv"
+          rm -rf ~/.pyenv
 
           mkdir -p "$PYENV_ROOT"
 
