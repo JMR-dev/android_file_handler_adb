@@ -18,6 +18,8 @@ permissions:
 env:
   # change this if you prefer a different pinned fpm version
   FPM_VERSION: "1.16.0"
+  # SSH private key for GitHub operations (populate in repository secrets)
+  CI_CD_GH_SSH_KEY: ${{ secrets.CI_CD_GH_SSH_KEY }}
 
 jobs:
   build-windows:
@@ -244,8 +246,22 @@ jobs:
 
           echo "Cloning pyenv (${PYENV_PYENV_REF}) and python-build (${PYENV_BUILD_REF}) via git (shallow)"
 
-          REPO_PYENV="https://github.com/pyenv/pyenv.git"
-          REPO_BUILD="https://github.com/pyenv/pyenv-build.git"
+          # Prefer SSH clones so CI can authenticate using a private key
+          REPO_PYENV="git@github.com:pyenv/pyenv.git"
+          REPO_BUILD="git@github.com:pyenv/pyenv-build.git"
+
+          # If a CI SSH key is provided, configure SSH for git operations
+          if [ -n "${CI_CD_GH_SSH_KEY:-}" ]; then
+            echo "Configuring SSH for GitHub using CI_CD_GH_SSH_KEY"
+            mkdir -p ~/.ssh
+            # write key and restrict permissions
+            printf '%s' "${CI_CD_GH_SSH_KEY}" > ~/.ssh/ci_cd_afh_adb
+            chmod 600 ~/.ssh/ci_cd_afh_adb
+            eval "$(ssh-agent -s)"
+            ssh-add ~/.ssh/ci_cd_afh_adb
+            # ensure GitHub's host key is known to avoid interactive prompt
+            ssh-keyscan github.com >> ~/.ssh/known_hosts
+          fi
 
           # pyenv: shallow clone the requested ref if possible, otherwise fall back to default shallow clone
           if [ -d "$PYENV_ROOT/.git" ]; then
