@@ -218,9 +218,10 @@ jobs:
 
       - name: Clean up pyenv
         run: |
-              echo "Removing existing home pyenv"
-              rm -rf /__w/android_file_handler_adb/android_file_handler_adb/.pyenv
-            
+                echo "Removing existing pyenv installations"
+                rm -rf "${GITHUB_WORKSPACE}/.pyenv"
+                rm -rf "${HOME}/.pyenv"
+                        
       - name: Tarball-based pyenv + python-build (non-interactive)
         id: pyenv_tarball
         run: |
