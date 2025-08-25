@@ -128,6 +128,7 @@ jobs:
           pacman -Syu --noconfirm
           pacman -S --noconfirm ruby base-devel curl git tar ca-certificates
           # Install fpm system-wide and pin version so fpm will be in /usr/local/bin
+          gem install --no-document erb
           gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/local/bin
           # persist system bindir to subsequent steps (usually already on PATH)
           echo "/usr/local/bin" >> $GITHUB_PATH
@@ -211,7 +212,7 @@ jobs:
           retry dnf -y install -y \
             git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
             readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
-            ruby ruby-devel rubygems rpm-build curl tar ca-certificates
+            ruby ruby-devel rubygems rpm-build tar ca-certificates
 
       - name: Tarball-based pyenv + python-build (non-interactive)
         id: pyenv_tarball
@@ -241,12 +242,33 @@ jobs:
           PYENV_PYENV_REF="${PYENV_PYENV_REF:-master}"
           PYENV_BUILD_REF="${PYENV_BUILD_REF:-master}"
 
-          echo "Downloading pyenv (${PYENV_PYENV_REF}) and python-build (${PYENV_BUILD_REF}) tarballs..."
-          retry curl -fsSL "https://github.com/pyenv/pyenv/archive/refs/heads/${PYENV_PYENV_REF}.tar.gz" \
-            | tar -xz --strip-components=1 -C "$PYENV_ROOT"
+          echo "Cloning pyenv (${PYENV_PYENV_REF}) and python-build (${PYENV_BUILD_REF}) via git (shallow)"
 
-          retry curl -fsSL "https://github.com/pyenv/pyenv-build/archive/refs/heads/${PYENV_BUILD_REF}.tar.gz" \
-            | tar -xz --strip-components=1 -C "$PYENV_ROOT/plugins/python-build"
+          REPO_PYENV="https://github.com/pyenv/pyenv.git"
+          REPO_BUILD="https://github.com/pyenv/pyenv-build.git"
+
+          # pyenv: shallow clone the requested ref if possible, otherwise fall back to default shallow clone
+          if [ -d "$PYENV_ROOT/.git" ]; then
+            retry git -C "$PYENV_ROOT" fetch --all --prune --depth=1 || true
+            retry git -C "$PYENV_ROOT" reset --hard "origin/${PYENV_PYENV_REF}" || true
+          else
+            if ! retry git clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT"; then
+              echo "Branch/ref ${PYENV_PYENV_REF} not available for shallow clone; falling back to default branch"
+              retry git clone --depth 1 "$REPO_PYENV" "$PYENV_ROOT"
+            fi
+          fi
+
+          # python-build plugin: place under plugins/python-build
+          mkdir -p "$PYENV_ROOT/plugins"
+          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
+            retry git -C "$PYENV_ROOT/plugins/python-build" fetch --all --prune --depth=1 || true
+            retry git -C "$PYENV_ROOT/plugins/python-build" reset --hard "origin/${PYENV_BUILD_REF}" || true
+          else
+            if ! retry git clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; then
+              echo "Branch/ref ${PYENV_BUILD_REF} not available for shallow clone; falling back to default branch"
+              retry git clone --depth 1 "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"
+            fi
+          fi
 
           # Initialize pyenv environment for this job
           export PATH="$PYENV_ROOT/bin:$PATH"
