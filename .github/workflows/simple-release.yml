@@ -137,41 +137,32 @@ jobs:
           poetry install
           poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
 
-      - name: Install fpm (system ruby) and package pacman
+      - name: Install system Ruby and fpm, then build pacman package
         run: |
-            # Insert as the 'run:' body for the Arch job step that installs fpm and packages
-            set -euo pipefail
+          set -euo pipefail
 
-            # Update and install ruby + build tools
-            pacman -Syu --noconfirm
-            pacman -S --noconfirm ruby base-devel
+          # Update DB and ensure full ruby stdlib is present
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm ruby base-devel
 
-            # Install fpm to /usr/local/bin so the executable is in a system path
-            # Pin the version for reproducibility
-            gem install --no-document -v '1.16.0' fpm -n /usr/local/bin
+          # Install fpm system-wide and pin version for reproducibility
+          gem install --no-document -v '1.16.0' fpm --bindir /usr/local/bin --install-dir /usr/lib/ruby/gems/3.4.0
 
-            # Ensure /usr/local/bin is available to subsequent workflow steps
-            echo "/usr/local/bin" >> $GITHUB_PATH
+          # Make sure /usr/local/bin is visible to later steps
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
-            # Immediate sanity checks
-            echo "ruby: $(ruby -v)"
-            echo "gem env:"
-            gem env
-            if ! command -v fpm >/dev/null 2>&1; then
-              echo "fpm still not found on PATH; diagnostics:"
-              ruby -e "puts Gem.user_dir"
-              ls -la "$(ruby -e 'print Gem.user_dir')/bin" || true
-              exit 1
-            fi
-            fpm --version
+          # Sanity checks
+          ruby -e "require 'erb'; puts 'erb OK'"
+          command -v fpm || { echo 'fpm not found on PATH after install'; exit 1; }
+          fpm --version
 
-            # Build package
-            VERSION="$(poetry version -s)"
-            mkdir -p dist
-            chmod +x dist/android-file-handler
-            fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-              --architecture x86_64 --prefix /usr/local/bin \
-              -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
+          # Build the package
+          VERSION="$(poetry version -s)"
+          mkdir -p dist
+          chmod +x dist/android-file-handler
+          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+            --architecture x86_64 --prefix /usr/local/bin \
+            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
