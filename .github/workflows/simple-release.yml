@@ -267,14 +267,21 @@ jobs:
             fi
           }
 
+          # Masked diagnostic: confirm whether CI_CD_PAT/EXTRA_HEADER is present (do NOT print secrets)
+          if [ -n "${CI_CD_PAT:-}" ]; then
+            echo "DEBUG: CI_CD_PAT is present -> git operations will use http.extraHeader (masked)"
+          else
+            echo "DEBUG: CI_CD_PAT is NOT present -> git operations will run unauthenticated"
+          fi
+
           # pyenv: shallow clone the requested ref if possible, otherwise fall back to default shallow clone
           if [ -d "$PYENV_ROOT/.git" ]; then
-            retry git -C "$PYENV_ROOT" fetch --all --prune --depth=1 || true
-            retry git -C "$PYENV_ROOT" reset --hard "origin/${PYENV_PYENV_REF}" || true
+            retry gitx -C "$PYENV_ROOT" fetch --all --prune --depth=1 || true
+            retry gitx -C "$PYENV_ROOT" reset --hard "origin/${PYENV_PYENV_REF}" || true
           elif [ -d "$PYENV_ROOT" ] && [ -z "$(ls -A "$PYENV_ROOT")" ]; then
             # directory exists but empty -> safe to clone into
-            retry git clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT" || \
-              { echo "Branch/ref ${PYENV_PYENV_REF} not available for shallow clone; falling back to default branch"; retry git clone --depth 1 "$REPO_PYENV" "$PYENV_ROOT"; }
+            retry gitx clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT" || \
+              { echo "Branch/ref ${PYENV_PYENV_REF} not available for shallow clone; falling back to default branch"; retry gitx clone --depth 1 "$REPO_PYENV" "$PYENV_ROOT"; }
           else
             # directory exists and is not a git repo (or contains leftover files) -> move aside then clone
             if [ -d "$PYENV_ROOT" ]; then
@@ -282,26 +289,26 @@ jobs:
               echo "Found existing non-git pyenv directory; moving aside to ${backup_dest}"
               mv "$PYENV_ROOT" "$backup_dest"
             fi
-            retry git clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT" || \
-              { echo "Branch/ref ${PYENV_PYENV_REF} not available for shallow clone; falling back to default branch"; retry git clone --depth 1 "$REPO_PYENV" "$PYENV_ROOT"; }
+            retry gitx clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT" || \
+              { echo "Branch/ref ${PYENV_PYENV_REF} not available for shallow clone; falling back to default branch"; retry gitx clone --depth 1 "$REPO_PYENV" "$PYENV_ROOT"; }
           fi
 
           # python-build plugin: place under plugins/python-build
           mkdir -p "$PYENV_ROOT/plugins"
           if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
-            retry git -C "$PYENV_ROOT/plugins/python-build" fetch --all --prune --depth=1 || true
-            retry git -C "$PYENV_ROOT/plugins/python-build" reset --hard "origin/${PYENV_BUILD_REF}" || true
+            retry gitx -C "$PYENV_ROOT/plugins/python-build" fetch --all --prune --depth=1 || true
+            retry gitx -C "$PYENV_ROOT/plugins/python-build" reset --hard "origin/${PYENV_BUILD_REF}" || true
           elif [ -d "$PYENV_ROOT/plugins/python-build" ] && [ -z "$(ls -A "$PYENV_ROOT/plugins/python-build")" ]; then
-            retry git clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build" || \
-              { echo "Branch/ref ${PYENV_BUILD_REF} not available for shallow clone; falling back to default branch"; retry git clone --depth 1 "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; }
+            retry gitx clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build" || \
+              { echo "Branch/ref ${PYENV_BUILD_REF} not available for shallow clone; falling back to default branch"; retry gitx clone --depth 1 "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; }
           else
             if [ -d "$PYENV_ROOT/plugins/python-build" ]; then
               pb_backup="${PYENV_ROOT}/plugins/python-build.bak.$(date +%s)"
               echo "Found existing non-git python-build dir; moving aside to ${pb_backup}"
               mv "$PYENV_ROOT/plugins/python-build" "$pb_backup"
             fi
-            retry git clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build" || \
-              { echo "Branch/ref ${PYENV_BUILD_REF} not available for shallow clone; falling back to default branch"; retry git clone --depth 1 "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; }
+            retry gitx clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build" || \
+              { echo "Branch/ref ${PYENV_BUILD_REF} not available for shallow clone; falling back to default branch"; retry gitx clone --depth 1 "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; }
           fi
 
           # Initialize pyenv environment for this job
