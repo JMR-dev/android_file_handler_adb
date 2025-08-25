@@ -227,108 +227,18 @@ jobs:
         id: pyenv_tarball
         run: |
           set -euo pipefail
-          retry() {
-            local max=5 n=1
-            until "$@"; do
-              if [ $n -ge $max ]; then
-                echo "Command failed after $n attempts: $*"
-                return 1
-              fi
-              echo "Command failed: $*. Retrying ($n/$max) after $((n * 2))s..."
-              sleep $((n * 2))
-              n=$((n + 1))
-            done
-            return 0
-          }
 
-          echo "Ensure curl/tar/ca-certificates present (dnf already installed them above)"
-          # Place pyenv inside workspace
           export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
           mkdir -p "$PYENV_ROOT"
-          mkdir -p "$PYENV_ROOT/plugins"
 
-          # Pin refs (replace master with tags/commits for reproducible runs)
-          PYENV_PYENV_REF="${PYENV_PYENV_REF:-master}"
-          PYENV_BUILD_REF="${PYENV_BUILD_REF:-master}"
+          echo "Downloading pyenv installer and running it"
+          wget -qO /tmp/pyenv_install.sh https://pyenv.run
+          chmod +x /tmp/pyenv_install.sh
+          bash /tmp/pyenv_install.sh
 
-          echo "Cloning pyenv (${PYENV_PYENV_REF}) and python-build (${PYENV_BUILD_REF}) via git (shallow)"
-
-          # Use HTTPS clones and a repository PAT when available
-          REPO_PYENV="https://github.com/pyenv/pyenv.git"
-          REPO_BUILD="https://github.com/pyenv/python-build.git"
-
-          EXTRA_HEADER=""
-          if [ -n "${CI_CD_PAT:-}" ]; then
-            echo "Configuring git to use CI_CD_PAT for HTTPS operations"
-            # Create Authorization header: Basic base64(:PAT)
-            EXTRA_HEADER="Authorization: Basic $(printf ':%s' "${CI_CD_PAT}" | base64)"
-            # set globally so git (and subprocesses) honor it for the duration of the job
-            git config --global http.extraHeader "${EXTRA_HEADER}"
-            # Prevent git from trying to prompt for credentials interactively
-            export GIT_TERMINAL_PROMPT=0
-          fi
-
-          gitx() {
-            # http.extraHeader is configured globally when CI_CD_PAT exists; just run git
-            git "$@"
-          }
-
-          # Masked diagnostic: confirm whether CI_CD_PAT/EXTRA_HEADER is present (do NOT print secrets)
-          if [ -n "${CI_CD_PAT:-}" ]; then
-            echo "DEBUG: CI_CD_PAT is present -> git operations will use http.extraHeader (masked)"
-          else
-            echo "DEBUG: CI_CD_PAT is NOT present -> git operations will run unauthenticated"
-          fi
-
-          # pyenv: shallow clone the requested ref if possible, otherwise fall back to default shallow clone
-          if [ -d "$PYENV_ROOT/.git" ]; then
-            retry gitx -C "$PYENV_ROOT" fetch --all --prune --depth=1 || true
-            retry gitx -C "$PYENV_ROOT" reset --hard "origin/${PYENV_PYENV_REF}" || true
-          elif [ -d "$PYENV_ROOT" ] && [ -z "$(ls -A "$PYENV_ROOT")" ]; then
-            # directory exists but empty -> safe to clone into
-            if [ -n "${CI_CD_PAT:-}" ]; then
-              echo "CI_CD_PAT present; using GitHub API tarball for pyenv"
-              retry curl -fSL -H "Authorization: token ${CI_CD_PAT}" "https://api.github.com/repos/pyenv/pyenv/tarball/${PYENV_PYENV_REF}" | tar -xz --strip-components=1 -C "$PYENV_ROOT"
-            else
-              if ! retry gitx clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT"; then
-                echo "git clone failed and no CI_CD_PAT; aborting"
-                exit 1
-              fi
-            fi
-          else
-            # directory exists and is not a git repo (or contains leftover files) -> move aside then clone
-            if [ -d "$PYENV_ROOT" ]; then
-              backup_dest="${PYENV_ROOT}.bak.$(date +%s)"
-              echo "Found existing non-git pyenv directory; moving aside to ${backup_dest}"
-              mv "$PYENV_ROOT" "$backup_dest"
-            fi
-            retry gitx clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT" || \
-              { echo "Branch/ref ${PYENV_PYENV_REF} not available for shallow clone; falling back to default branch"; retry gitx clone --depth 1 "$REPO_PYENV" "$PYENV_ROOT"; }
-          fi
-
-          # python-build plugin: place under plugins/python-build
-          mkdir -p "$PYENV_ROOT/plugins"
-          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
-            retry gitx -C "$PYENV_ROOT/plugins/python-build" fetch --all --prune --depth=1 || true
-            retry gitx -C "$PYENV_ROOT/plugins/python-build" reset --hard "origin/${PYENV_BUILD_REF}" || true
-          elif [ -d "$PYENV_ROOT/plugins/python-build" ] && [ -z "$(ls -A "$PYENV_ROOT/plugins/python-build")" ]; then
-            if [ -n "${CI_CD_PAT:-}" ]; then
-              echo "CI_CD_PAT present; using GitHub API tarball for python-build"
-              retry curl -fSL -H "Authorization: token ${CI_CD_PAT}" "https://api.github.com/repos/pyenv/pyenv-build/tarball/${PYENV_BUILD_REF}" | tar -xz --strip-components=1 -C "$PYENV_ROOT/plugins/python-build"
-            else
-              if ! retry gitx clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; then
-                echo "git clone for python-build failed and no CI_CD_PAT; aborting"
-                exit 1
-              fi
-            fi
-          else
-            if [ -d "$PYENV_ROOT/plugins/python-build" ]; then
-              pb_backup="${PYENV_ROOT}/plugins/python-build.bak.$(date +%s)"
-              echo "Found existing non-git python-build dir; moving aside to ${pb_backup}"
-              mv "$PYENV_ROOT/plugins/python-build" "$pb_backup"
-            fi
-            retry gitx clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build" || \
-              { echo "Branch/ref ${PYENV_BUILD_REF} not available for shallow clone; falling back to default branch"; retry gitx clone --depth 1 "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; }
+          # If installer wrote to $HOME/.pyenv, move it into the workspace
+          if [ -d "$HOME/.pyenv" ] && [ ! -d "$PYENV_ROOT" ]; then
+            mv "$HOME/.pyenv" "$PYENV_ROOT"
           fi
 
           # Initialize pyenv environment for this job
@@ -341,6 +251,8 @@ jobs:
 
           echo "pyenv version:"
           "$PYENV_ROOT/bin/pyenv" --version || true
+          # Verify pyenv can list installed/available versions (small, non-fatal smoke test)
+          "$PYENV_ROOT/bin/pyenv" versions --bare | head -n 5 || true
           echo "python-build plugin at: $PYENV_ROOT/plugins/python-build"
           ls -la "$PYENV_ROOT/plugins/python-build" || true
 
