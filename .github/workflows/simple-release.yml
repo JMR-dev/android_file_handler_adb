@@ -216,6 +216,13 @@ jobs:
             readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
             ruby ruby-devel rubygems rpm-build tar ca-certificates
 
+      - name: Configure Git credentials
+        run: |
+          # Configure git to use repository PAT for HTTPS operations to avoid interactive prompts
+          git config --global url."https://${{ secrets.CI_CD_PAT }}@github.com/".insteadOf "https://github.com/"
+      
+      
+
       - name: Tarball-based pyenv + python-build (non-interactive)
         id: pyenv_tarball
         run: |
@@ -279,12 +286,12 @@ jobs:
             retry gitx -C "$PYENV_ROOT" reset --hard "origin/${PYENV_PYENV_REF}" || true
           elif [ -d "$PYENV_ROOT" ] && [ -z "$(ls -A "$PYENV_ROOT")" ]; then
             # directory exists but empty -> safe to clone into
-            if ! retry gitx clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT"; then
-              echo "git clone failed; attempting GitHub API tarball fallback using PAT"
-              if [ -n "${CI_CD_PAT:-}" ]; then
-                retry curl -fSL -H "Authorization: token ${CI_CD_PAT}" "https://api.github.com/repos/pyenv/pyenv/tarball/${PYENV_PYENV_REF}" | tar -xz --strip-components=1 -C "$PYENV_ROOT"
-              else
-                echo "No CI_CD_PAT provided; cannot use tarball fallback"
+            if [ -n "${CI_CD_PAT:-}" ]; then
+              echo "CI_CD_PAT present; using GitHub API tarball for pyenv"
+              retry curl -fSL -H "Authorization: token ${CI_CD_PAT}" "https://api.github.com/repos/pyenv/pyenv/tarball/${PYENV_PYENV_REF}" | tar -xz --strip-components=1 -C "$PYENV_ROOT"
+            else
+              if ! retry gitx clone --depth 1 --branch "${PYENV_PYENV_REF}" "$REPO_PYENV" "$PYENV_ROOT"; then
+                echo "git clone failed and no CI_CD_PAT; aborting"
                 exit 1
               fi
             fi
@@ -305,12 +312,12 @@ jobs:
             retry gitx -C "$PYENV_ROOT/plugins/python-build" fetch --all --prune --depth=1 || true
             retry gitx -C "$PYENV_ROOT/plugins/python-build" reset --hard "origin/${PYENV_BUILD_REF}" || true
           elif [ -d "$PYENV_ROOT/plugins/python-build" ] && [ -z "$(ls -A "$PYENV_ROOT/plugins/python-build")" ]; then
-            if ! retry gitx clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; then
-              echo "git clone for python-build failed; attempting GitHub API tarball fallback using PAT"
-              if [ -n "${CI_CD_PAT:-}" ]; then
-                retry curl -fSL -H "Authorization: token ${CI_CD_PAT}" "https://api.github.com/repos/pyenv/pyenv-build/tarball/${PYENV_BUILD_REF}" | tar -xz --strip-components=1 -C "$PYENV_ROOT/plugins/python-build"
-              else
-                echo "No CI_CD_PAT provided; cannot use tarball fallback"
+            if [ -n "${CI_CD_PAT:-}" ]; then
+              echo "CI_CD_PAT present; using GitHub API tarball for python-build"
+              retry curl -fSL -H "Authorization: token ${CI_CD_PAT}" "https://api.github.com/repos/pyenv/pyenv-build/tarball/${PYENV_BUILD_REF}" | tar -xz --strip-components=1 -C "$PYENV_ROOT/plugins/python-build"
+            else
+              if ! retry gitx clone --depth 1 --branch "${PYENV_BUILD_REF}" "$REPO_BUILD" "$PYENV_ROOT/plugins/python-build"; then
+                echo "git clone for python-build failed and no CI_CD_PAT; aborting"
                 exit 1
               fi
             fi
