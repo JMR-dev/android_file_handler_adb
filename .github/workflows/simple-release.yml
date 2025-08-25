@@ -166,18 +166,6 @@ jobs:
             git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
           fi
 
-          # Clone or update python-build plugin (idempotent)
-          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
-            echo "python-build plugin already exists — updating"
-            cd "$PYENV_ROOT/plugins/python-build"
-            git fetch --all --prune
-            git reset --hard origin/master || true
-            cd -
-          else
-            echo "Cloning python-build plugin"
-            git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
-          fi
-
           # Persist pyenv environment for subsequent steps
           echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
           echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
