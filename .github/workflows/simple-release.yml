@@ -214,7 +214,7 @@ jobs:
           retry dnf -y install -y \
             git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
             readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
-            ruby ruby-devel rubygems rpm-build tar ca-certificates
+            ruby ruby-devel rubygems rpm-build tar ca-certificates wget
 
       - name: Configure Git credentials
         run: |
