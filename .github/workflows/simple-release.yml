@@ -216,13 +216,6 @@ jobs:
             readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
             ruby ruby-devel rubygems rpm-build tar ca-certificates wget
 
-      - name: Configure Git credentials
-        run: |
-          # Configure git to use repository PAT for HTTPS operations to avoid interactive prompts
-          git config --global url."https://x-access-token:${{ secrets.CI_CD_PAT }}@github.com/".insteadOf "https://github.com/"
-      
-      
-
       - name: Tarball-based pyenv + python-build (non-interactive)
         id: pyenv_tarball
         run: |
