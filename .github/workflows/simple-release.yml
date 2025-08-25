@@ -146,29 +146,48 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install pyenv and build Python 3.12.11 (native to Rocky)
+      - name: Install pyenv and build Python 3.12.11 (native to Rocky) — idempotent
         env:
           PYENV_ROOT: ${{ github.workspace }}/.pyenv_temp
         run: |
-          # Use $HOME/.pyenv so we don't touch repository files
+          # Use $HOME/.pyenv for the pyenv installation (runtime only — this will NOT change your repo files)
           export PYENV_ROOT="$HOME/.pyenv"
           export PATH="$PYENV_ROOT/bin:$PATH"
 
-          # Clone pyenv and python-build plugin
-          git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
-          git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
+          # Clone or update pyenv (idempotent)
+          if [ -d "$PYENV_ROOT/.git" ]; then
+            echo "pyenv already exists — updating"
+            cd "$PYENV_ROOT"
+            git fetch --all --prune
+            git reset --hard origin/master || true
+            cd -
+          else
+            echo "Cloning pyenv"
+            git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
+          fi
+
+          # Clone or update python-build plugin (idempotent)
+          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
+            echo "python-build plugin already exists — updating"
+            cd "$PYENV_ROOT/plugins/python-build"
+            git fetch --all --prune
+            git reset --hard origin/master || true
+            cd -
+          else
+            echo "Cloning python-build plugin"
+            git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
+          fi
 
           # Persist pyenv environment for subsequent steps
           echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
           echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
 
-          # Initialize pyenv for this step
-          export PYENV_ROOT="$HOME/.pyenv"
+          # Initialize pyenv for this step and ensure pyenv is usable immediately
           export PATH="$PYENV_ROOT/bin:$PATH"
           eval "$($PYENV_ROOT/bin/pyenv init -)"
 
-          # Build and install specific Python version (specify exact patch for reproducibility)
-          $PYENV_ROOT/bin/pyenv install -v 3.12.11
+          # Install the specified Python version if not already installed (-s = skip if present)
+          $PYENV_ROOT/bin/pyenv install -s 3.12.11
           $PYENV_ROOT/bin/pyenv global 3.12.11
 
           # Verify installed python
