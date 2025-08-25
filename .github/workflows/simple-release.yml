@@ -147,6 +147,7 @@ jobs:
 
           # Install fpm system-wide and pin version for reproducibility
           gem install --no-document -v '1.16.0' fpm --bindir /usr/local/bin --install-dir /usr/lib/ruby/gems/3.4.0
+          gem install --no-document erb
 
           # Make sure /usr/local/bin is visible to later steps
           echo "/usr/local/bin" >> $GITHUB_PATH
