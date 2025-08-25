@@ -22,6 +22,18 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
+      - name: Ensure Poetry is on PATH (Windows)
+        shell: pwsh
+        run: |
+          # Add the typical Poetry installer location to PATH for subsequent steps.
+          # This writes the directory to GITHUB_PATH so it is appended to PATH automatically.
+          $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
+          Write-Output "Adding $poetryPath to PATH via GITHUB_PATH"
+          Write-Output $poetryPath >> $Env:GITHUB_PATH
+          # Confirm it's on PATH for this step (diagnostics only)
+          Write-Output "PATH is now: $env:PATH"
+          Get-Command -ErrorAction SilentlyContinue poetry | ForEach-Object { Write-Output "poetry location: $($_.Source)" } || Write-Output "poetry not found yet (will be available in subsequent steps)"
+
       - name: Install dependencies
         run: |
           poetry install
@@ -164,6 +176,18 @@ jobs:
           else
             echo "Cloning pyenv"
             git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
+          fi
+
+          # Clone or update python-build plugin (idempotent)
+          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
+            echo "python-build plugin already exists — updating"
+            cd "$PYENV_ROOT/plugins/python-build"
+            git fetch --all --prune
+            git reset --hard origin/master || true
+            cd -
+          else
+            echo "Cloning python-build plugin"
+            git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
           fi
 
           # Persist pyenv environment for subsequent steps
