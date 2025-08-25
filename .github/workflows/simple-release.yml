@@ -1,3 +1,12 @@
+# Multi-platform build + packaging workflow
+# - Builds a pyinstaller executable on Windows, Debian, Arch, Rocky.
+# - Packages using fpm into .deb, .rpm, and pacman (.pkg.tar.zst) files with explicit filenames.
+# - Creates a GitHub Release with the produced artifacts.
+#
+# Notes:
+# - Poetry is installed via snok/install-poetry@v1 in all jobs.
+# - fpm gem is pinned to 1.16.0 in the examples; change as needed.
+# - Rocky job uses tarball downloads for pyenv and python-build (non-interactive, CI-friendly).
 name: Build Multi-Platform Binaries
 
 on:
@@ -5,6 +14,10 @@ on:
 
 permissions:
   contents: write
+
+env:
+  # change this if you prefer a different pinned fpm version
+  FPM_VERSION: "1.16.0"
 
 jobs:
   build-windows:
@@ -28,6 +41,7 @@ jobs:
       - name: Ensure Poetry is on PATH (Windows)
         shell: pwsh
         run: |
+          # Add Poetry user bin to PATH for subsequent steps in this job
           $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
           Write-Output $poetryPath >> $Env:GITHUB_PATH
 
@@ -50,11 +64,13 @@ jobs:
     container:
       image: python:3.12-slim
     steps:
-      - name: Install system dependencies
+      - name: Install system dependencies & gem fpm
         run: |
+          set -euo pipefail
           apt-get update
-          apt-get install -y curl git build-essential ruby ruby-dev gcc make build-essential zlib1g-dev
-          gem install --no-document fpm
+          apt-get install -y --no-install-recommends curl git build-essential ruby ruby-dev gcc make zlib1g-dev ca-certificates
+          # install pinned fpm to the system gem dir (will be available under gem env's EXECUTABLE DIRECTORY or /usr/local/bin)
+          gem install --no-document -v "${FPM_VERSION}" fpm
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -87,27 +103,34 @@ jobs:
 
       - name: Package .deb (fpm)
         run: |
+          set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           VERSION="$(poetry version -s)"
           mkdir -p dist
           chmod +x dist/android-file-handler
+          # explicit filename into dist/
           fpm -s dir -t deb -n android-file-handler -v "$VERSION" --architecture amd64 --prefix /usr/local/bin -p "dist/android-file-handler_${VERSION}_amd64.deb" dist/android-file-handler
 
       - name: Upload Debian .deb
         uses: actions/upload-artifact@v4
         with:
           name: debian-package
-          path: dist/*.deb
+          path: dist/android-file-handler_*.deb
 
   build-arch:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
     steps:
-      - name: Install system dependencies (Arch)
+      - name: Install system dependencies (Arch) and system Ruby
         run: |
+          set -euo pipefail
           pacman -Syu --noconfirm
-          pacman -S --noconfirm python python-pip curl git base-devel ruby
+          pacman -S --noconfirm ruby base-devel curl git tar ca-certificates
+          # Install fpm system-wide and pin version so fpm will be in /usr/local/bin
+          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/local/bin
+          # persist system bindir to subsequent steps (usually already on PATH)
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -128,42 +151,22 @@ jobs:
         run: |
           echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
           export PATH="$HOME/.local/bin:$PATH"
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
 
       - name: Install dependencies & build executable
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           poetry install
           poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
 
-      - name: Install system Ruby and fpm, then build pacman package
+      - name: Package pacman (fpm)
         run: |
           set -euo pipefail
-
-          # Update DB and ensure full ruby stdlib is present
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm ruby base-devel
-
-          # Install fpm system-wide and pin version for reproducibility
-          gem install --no-document -v '1.16.0' fpm --bindir /usr/local/bin --install-dir /usr/lib/ruby/gems/3.4.0
-          gem install --no-document erb
-
-          # Make sure /usr/local/bin is visible to later steps
-          echo "/usr/local/bin" >> $GITHUB_PATH
-
-          # Sanity checks
-          ruby -e "require 'erb'; puts 'erb OK'"
-          command -v fpm || { echo 'fpm not found on PATH after install'; exit 1; }
-          fpm --version
-
-          # Build the package
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           VERSION="$(poetry version -s)"
           mkdir -p dist
           chmod +x dist/android-file-handler
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-            --architecture x86_64 --prefix /usr/local/bin \
-            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
+          # explicit filename into dist/
+          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
@@ -176,41 +179,103 @@ jobs:
     container:
       image: rockylinux:9
     steps:
-      - name: Install system build dependencies for Python and pyenv (enable CRB for -devel pkgs)
+      - name: Robust dnf setup and install build deps (retry-clean-refresh)
         run: |
-          dnf -y install dnf-plugins-core
-          dnf config-manager --set-enabled crb
-          dnf -y update
-          dnf -y install git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
-              readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch ruby ruby-devel rubygems rpm-build
+          set -euo pipefail
+          retry() {
+            local max_tries=5
+            local sleep_base=3
+            local n=1
+            until "$@"; do
+              if [ $n -ge $max_tries ]; then
+                echo "Command failed after $n attempts: $*"
+                return 1
+              fi
+              echo "Command failed: $*. Retrying ($n/$max_tries) after $((sleep_base * n))s..."
+              sleep $((sleep_base * n))
+              n=$((n + 1))
+            done
+            return 0
+          }
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+          # Ensure plugin and enable CRB
+          retry dnf -y install dnf-plugins-core
+          retry dnf config-manager --set-enabled crb || true
 
-      - name: Install pyenv and build Python 3.12.11 (idempotent)
-        env:
-          PYENV_ROOT: ${{ github.workspace }}/.pyenv_temp
+          # Clean caches and refresh metadata
+          retry dnf -y clean all
+          rm -rf /var/cache/dnf || true
+          retry dnf -y makecache --refresh
+
+          # Install build-time deps including ruby so gem stdlib is present
+          retry dnf -y install -y \
+            git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
+            readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch \
+            ruby ruby-devel rubygems rpm-build curl tar ca-certificates
+
+      - name: Tarball-based pyenv + python-build (non-interactive)
+        id: pyenv_tarball
         run: |
-          export PYENV_ROOT="$HOME/.pyenv"
-          export PATH="$PYENV_ROOT/bin:$PATH"
-          if [ -d "$PYENV_ROOT/plugins/python-build/.git" ]; then
-              cd "$PYENV_ROOT/plugins/python-build"
-              git fetch --all --prune
-              git reset --hard origin/master || true
-              cd -
-          else
-              git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
-          fi
-          echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
-          echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
+          set -euo pipefail
+          retry() {
+            local max=5 n=1
+            until "$@"; do
+              if [ $n -ge $max ]; then
+                echo "Command failed after $n attempts: $*"
+                return 1
+              fi
+              echo "Command failed: $*. Retrying ($n/$max) after $((n * 2))s..."
+              sleep $((n * 2))
+              n=$((n + 1))
+            done
+            return 0
+          }
+
+          echo "Ensure curl/tar/ca-certificates present (dnf already installed them above)"
+          # Place pyenv inside workspace
+          export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
+          mkdir -p "$PYENV_ROOT"
+          mkdir -p "$PYENV_ROOT/plugins"
+
+          # Pin refs (replace master with tags/commits for reproducible runs)
+          PYENV_PYENV_REF="${PYENV_PYENV_REF:-master}"
+          PYENV_BUILD_REF="${PYENV_BUILD_REF:-master}"
+
+          echo "Downloading pyenv (${PYENV_PYENV_REF}) and python-build (${PYENV_BUILD_REF}) tarballs..."
+          retry curl -fsSL "https://github.com/pyenv/pyenv/archive/refs/heads/${PYENV_PYENV_REF}.tar.gz" \
+            | tar -xz --strip-components=1 -C "$PYENV_ROOT"
+
+          retry curl -fsSL "https://github.com/pyenv/pyenv-build/archive/refs/heads/${PYENV_BUILD_REF}.tar.gz" \
+            | tar -xz --strip-components=1 -C "$PYENV_ROOT/plugins/python-build"
+
+          # Initialize pyenv environment for this job
           export PATH="$PYENV_ROOT/bin:$PATH"
           eval "$($PYENV_ROOT/bin/pyenv init -)"
+
+          # Persist environment variables for subsequent steps
+          echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
+          echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
+
+          echo "pyenv version:"
+          "$PYENV_ROOT/bin/pyenv" --version || true
+          echo "python-build plugin at: $PYENV_ROOT/plugins/python-build"
+          ls -la "$PYENV_ROOT/plugins/python-build" || true
+
+      - name: Build Python with pyenv (3.12.11) and set global
+        env:
+          PYENV_ROOT: ${{ github.workspace }}/.pyenv
+        run: |
+          set -euo pipefail
+          export PYENV_ROOT="${PYENV_ROOT}"
+          export PATH="$PYENV_ROOT/bin:$PATH"
+          eval "$($PYENV_ROOT/bin/pyenv init -)"
+          # Install python (idempotent)
           $PYENV_ROOT/bin/pyenv install -s 3.12.11
           $PYENV_ROOT/bin/pyenv global 3.12.11
           python --version
           pip --version
 
-      - name: Install Poetry (use action)
+      - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
           version: latest
@@ -226,14 +291,20 @@ jobs:
 
       - name: Install dependencies & build executable
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
           poetry env use 3.12.11 || true
           poetry install
           poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
 
-      - name: Install fpm (gem) and package .rpm
+      - name: Install fpm and package .rpm
         run: |
-          gem install --no-document fpm
+          set -euo pipefail
+          # install pinned fpm and ensure binary is in system bindir
+          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/local/bin
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+          # Build rpm with explicit filename
           VERSION="$(poetry version -s)"
           mkdir -p dist
           chmod +x dist/android-file-handler
@@ -254,6 +325,11 @@ jobs:
         with:
           merge-multiple: true
           path: ./binaries
+
+      - name: List downloaded binaries (debug)
+        run: |
+          echo "Downloaded files:"
+          ls -la ./binaries || true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
