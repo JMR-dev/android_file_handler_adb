@@ -219,7 +219,7 @@ jobs:
       - name: Configure Git credentials
         run: |
           # Configure git to use repository PAT for HTTPS operations to avoid interactive prompts
-          git config --global url."https://${{ secrets.CI_CD_PAT }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${{ secrets.CI_CD_PAT }}@github.com/".insteadOf "https://github.com/"
       
       
 
