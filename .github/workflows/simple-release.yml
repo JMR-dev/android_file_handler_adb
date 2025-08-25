@@ -221,11 +221,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
           
           echo "Removing existing home pyenv: $HOME/.pyenv"
-          rm -rf ~/.pyenv
-
+          rm -rf /__w/android_file_handler_adb/android_file_handler_adb/.pyenv
+          
+          export PYENV_ROOT="${GITHUB_WORKSPACE}/.pyenv"
           mkdir -p "$PYENV_ROOT"
 
           echo "Downloading pyenv installer and running it"
