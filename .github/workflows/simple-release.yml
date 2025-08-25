@@ -1,0 +1,195 @@
+name: Build Multi-Platform Binaries
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: |
+          poetry install
+
+      - name: Build Windows executable
+        run: |
+          poetry run pyinstaller --onefile --windowed --icon=icon_media/robot_files_256.ico --name android-file-handler src/main.py
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/android-file-handler.exe
+
+  build-debian:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12-slim
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl git build-essential
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3.12 -
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+
+      - name: Configure Poetry
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry env use python3.12
+          poetry install
+
+      - name: Build Debian executable
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
+
+      - name: Upload Debian artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-binary
+          path: dist/android-file-handler
+
+  build-arch:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git base-devel curl
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python -
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+
+      - name: Configure Poetry
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry install
+
+      - name: Build Arch executable
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
+
+      - name: Upload Arch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-binary
+          path: dist/android-file-handler
+
+  build-rocky:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:9
+    steps:
+      - name: Install system dependencies
+        run: |
+          dnf update -y
+          dnf install -y curl git gcc gcc-c++ make
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3.12 -
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+
+      - name: Configure Poetry
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry env use python3.12
+          poetry install
+
+      - name: Build Rocky executable
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry run pyinstaller --onefile --icon=icon_media/robot_files_256.png --name android-file-handler src/main.py
+
+      - name: Upload Rocky artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocky-binary
+          path: dist/android-file-handler
+
+  create-release:
+    needs: [build-windows, build-debian, build-arch, build-rocky]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./binaries
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./binaries/android-file-handler.exe
+            ./binaries/android-file-handler
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
