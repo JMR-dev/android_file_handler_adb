@@ -132,21 +132,47 @@ jobs:
     container:
       image: rockylinux:9
     steps:
-      - name: Install system dependencies (avoid curl to prevent curl-minimal conflict)
+      - name: Install system build dependencies for Python and pyenv
         run: |
+          # update metadata and install packages required to build CPython from source
           dnf -y update
-          # omit installing curl to avoid conflicts with curl-minimal
-          dnf -y install git gcc gcc-c++ make
+          dnf -y install git gcc make openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
+            readline-devel sqlite-devel tk-devel gdbm-devel libuuid-devel patch
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Install pyenv and build Python 3.12.11 (native to Rocky)
+        env:
+          PYENV_ROOT: ${{ github.workspace }}/.pyenv_temp
+        run: |
+          # Use $HOME/.pyenv so we don't touch repository files; we will record the path via GITHUB_ENV
+          export PYENV_ROOT="$HOME/.pyenv"
+          export PATH="$PYENV_ROOT/bin:$PATH"
 
-      - name: Install Poetry
+          # Clone pyenv and python-build plugin
+          git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
+          git clone https://github.com/pyenv/pyenv-build.git "$PYENV_ROOT/plugins/python-build"
+
+          # Persist pyenv environment for subsequent steps
+          echo "PYENV_ROOT=$PYENV_ROOT" >> $GITHUB_ENV
+          # prepend shims/bin to PATH so pyenv shims are available in later steps
+          echo "PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" >> $GITHUB_ENV
+
+          # Provide basic pyenv init for this step so we can run the pyenv binary immediately
+          export PYENV_ROOT="$HOME/.pyenv"
+          export PATH="$PYENV_ROOT/bin:$PATH"
+          eval "$($PYENV_ROOT/bin/pyenv init -)"
+
+          # Build and install specific Python version (specify the exact patch for reproducibility)
+          $PYENV_ROOT/bin/pyenv install -v 3.12.11
+          $PYENV_ROOT/bin/pyenv global 3.12.11
+
+          # Verify installed python
+          python --version
+          pip --version
+
+      - name: Install Poetry (use action; Poetry will use the pyenv-built python)
         uses: snok/install-poetry@v1
         with:
           version: latest
@@ -163,7 +189,8 @@ jobs:
       - name: Install dependencies
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          poetry env use python3.12 || true
+          # ensure poetry uses the pyenv python
+          poetry env use 3.12.11 || true
           poetry install
 
       - name: Build Rocky executable
