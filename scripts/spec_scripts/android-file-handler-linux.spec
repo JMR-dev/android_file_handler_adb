@@ -4,7 +4,10 @@ a = Analysis(
     ['../../src/main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('../../src/gui', 'gui')],
+    datas=[
+        ('../../src/gui', 'gui'),
+        ('../../scripts/linux_postinst.sh', 'scripts'),
+    ],
     hiddenimports=[
         'gui',
         'gui.file_browser',
