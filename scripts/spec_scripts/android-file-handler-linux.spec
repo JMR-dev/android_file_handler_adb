@@ -43,5 +43,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon_media/robot_files_256.png',
 )

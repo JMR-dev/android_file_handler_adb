@@ -4,7 +4,7 @@ a = Analysis(
     ['src/main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('src/gui', 'gui')],
+    datas=[('src/gui', 'gui'), ('../scripts/windows/first_run_install.ps1', 'scripts/windows')],
     hiddenimports=[
         'gui',
         'gui.file_browser',

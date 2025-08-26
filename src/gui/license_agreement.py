@@ -9,6 +9,9 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext
 import tempfile
 import stat
+import subprocess
+import sys
+import os
 
 
 def get_license_file_path() -> str:
@@ -104,12 +107,48 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE."""
 
 
+def resource_path(relative_path: str) -> str:
+    """Return absolute path to resource for dev and frozen runs."""
+    try:
+        if getattr(sys, "frozen", False):
+            base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        else:
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.normpath(os.path.join(base, relative_path))
+    except Exception:
+        return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path))
+
+
+def run_windows_first_run_if_needed() -> None:
+    """If running on Windows and license not agreed, launch first-run installer script.
+
+    Uses `resource_path` to locate the bundled PowerShell script in both dev and frozen modes.
+    """
+    try:
+        if not sys.platform.startswith("win"):
+            return
+
+        if check_license_agreement():
+            return
+
+        script_rel = os.path.join("scripts", "windows", "first_run_install.ps1")
+        script_path = resource_path(script_rel)
+        if not os.path.exists(script_path):
+            return
+        try:
+            subprocess.Popen(["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 class LicenseAgreementFrame(tk.Frame):
     """License agreement UI frame that can be embedded in the main window."""
-    
+
     def __init__(self, parent, on_agree_callback):
         """Initialize the license agreement frame.
-        
+
         Args:
             parent: Parent widget
             on_agree_callback: Function to call when user agrees to license
