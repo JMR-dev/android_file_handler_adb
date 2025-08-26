@@ -5,7 +5,7 @@ poetry lock
 poetry install
 
 # Build using the Linux spec so the build is reproducible and uses the project spec
-poetry run pyinstaller scripts/spec_scripts/android-file-handler-linux.spec --distpath dist
+poetry run pyinstaller /home/jasonross/workspace/android_file_handler_adb/scripts/spec_scripts/android-file-handler-linux.spec --distpath dist
 
 # Package into a Debian .deb using fpm
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"

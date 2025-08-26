@@ -7,42 +7,73 @@ import os
 import sys
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
+import tempfile
+import stat
 
 
-def get_license_file_path():
-    """Get the path to the license agreement file."""
-    # Get the directory where the application is running from
-    if getattr(sys, 'frozen', False):
-        # Running as executable
-        app_dir = os.path.dirname(sys.executable)
+def get_license_file_path() -> str:
+    """Return the per-user license-agreed file path.
+
+    Uses platform-appropriate user config directory when possible:
+    - On Linux/macOS this will typically use ~/.config or ~/.android-file-handler fallback.
+    - On Windows it prefers %APPDATA% (via platformdirs) and falls back to ~.
+    """
+    try:
+        from platformdirs import user_config_dir
+    except Exception:
+        user_config_dir = None
+
+    if getattr(sys, "frozen", False):
+        # Running as executable: prefer platform dirs
+        if user_config_dir:
+            config_dir = os.path.join(user_config_dir("android-file-handler"), "")
+        else:
+            config_dir = os.path.expanduser("~/.android-file-handler")
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "license_agreed.ini")
     else:
-        # Running as script - use directory containing the main script
+        # Dev mode: store beside project tree
         app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    return os.path.join(app_dir, "license_agreed.ini")
+        return os.path.join(app_dir, "dev-mode_license_agreed.ini")
 
 
-def check_license_agreement():
+def check_license_agreement() -> bool:
     """Check if user has already agreed to the license."""
     license_file = get_license_file_path()
     try:
         if os.path.exists(license_file):
-            with open(license_file, 'r') as f:
-                content = f.read().strip()
-                return content == "1"
+            with open(license_file, "r") as f:
+                return f.read().strip() == "1"
         return False
     except Exception:
         return False
 
 
-def save_license_agreement():
-    """Save that the user has agreed to the license."""
+def save_license_agreement() -> bool:
+    """Persist that the user agreed to the license.
+
+    Writes atomically and sets secure file permissions on POSIX.
+    """
     license_file = get_license_file_path()
     try:
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(license_file), exist_ok=True)
-        with open(license_file, 'w') as f:
-            f.write("1")
+        parent_dir = os.path.dirname(license_file)
+        os.makedirs(parent_dir, exist_ok=True)
+
+        # Atomic write to temporary file then rename
+        fd, tmp_path = tempfile.mkstemp(dir=parent_dir)
+        try:
+            with os.fdopen(fd, "w") as fh:
+                fh.write("1")
+            # Set owner-only permissions on POSIX
+            if os.name == "posix":
+                os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, license_file)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
         return True
     except Exception:
         return False
