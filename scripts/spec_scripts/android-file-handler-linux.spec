@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
 a = Analysis(
-    ['src/main.py'],
+    ['../../src/main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('src/gui', 'gui')],
+    datas=[('../../src/gui', 'gui')],
     hiddenimports=[
         'gui',
         'gui.file_browser',

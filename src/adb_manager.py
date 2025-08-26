@@ -14,6 +14,9 @@ import glob
 import time
 import re
 from typing import Optional, Tuple, Callable
+import tempfile
+from typing import Optional
+import hashlib
 
 def get_executable_directory() -> str:
     """Get the directory containing the executable or script."""
@@ -23,6 +26,140 @@ def get_executable_directory() -> str:
     else:
         # Running as script - use the script's directory
         return os.path.dirname(os.path.abspath(__file__))
+    
+def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> str:
+    """Ensure platform-tools installed in a per-user data dir and return adb path.
+
+    Behavior:
+    - Uses platformdirs.user_data_dir('android-file-handler') if available,
+      else falls back to ~/.local/share/android-file-handler (POSIX) or
+      %LOCALAPPDATA% on Windows via expanduser.
+    - Installs into <data_dir>/platform-tools/<version>/ and creates/update
+      a symlink <data_dir>/platform-tools/current -> <version>.
+    - Downloads into a temp dir and moves atomically to avoid partial installs.
+    - Sets executable permissions on adb binary.
+    - Returns absolute path to adb binary (no PATH modification required).
+    """
+    try:
+        from platformdirs import user_data_dir  # type: ignore
+    except Exception:
+        user_data_dir = None
+
+    # Determine base data dir
+    if user_data_dir:
+        data_root = os.path.join(user_data_dir("android-file-handler"), "platform-tools")
+    else:
+        # Fallback: use home-based location
+        home = os.path.expanduser("~")
+        data_root = os.path.join(home, ".local", "share", "android-file-handler", "platform-tools")
+
+    os.makedirs(data_root, exist_ok=True)
+
+    target_version = version_tag or "latest"
+    target_dir = os.path.join(data_root, target_version)
+    current_link = os.path.join(data_root, "current")
+
+    # If current symlink exists and points to a valid adb, return it
+    if os.path.islink(current_link):
+        try:
+            resolved = os.path.realpath(current_link)
+            adb_name = "adb.exe" if sys.platform.startswith("win") else "adb"
+            candidate = os.path.join(resolved, adb_name)
+            if os.path.isfile(candidate):
+                return candidate
+        except Exception:
+            pass
+
+    # If requested version already installed, point current there
+    if os.path.isdir(target_dir) and os.path.isfile(os.path.join(target_dir, "adb" if not sys.platform.startswith("win") else "adb.exe")):
+        # update symlink atomically
+        if os.path.islink(current_link) or os.path.exists(current_link):
+            try:
+                os.remove(current_link)
+            except Exception:
+                pass
+        try:
+            os.symlink(target_dir, current_link)
+        except Exception:
+            # best-effort, ignore if unable to create symlink
+            pass
+        return os.path.join(target_dir, "adb.exe" if sys.platform.startswith("win") else "adb")
+
+    # Download into temp location and extract
+    tmp_dir = tempfile.mkdtemp(prefix="platform-tools-")
+    try:
+        # choose URL
+        if sys.platform.startswith("linux"):
+            url = ADB_LINUX_ZIP_URL
+        elif sys.platform.startswith("win"):
+            url = ADB_WIN_ZIP_URL
+        else:
+            raise RuntimeError("Unsupported platform for platform-tools download")
+
+        # download in streaming fashion to avoid memory pressure
+        resp = requests.get(url, stream=True, timeout=30)
+        resp.raise_for_status()
+
+        zip_path = os.path.join(tmp_dir, "platform-tools.zip")
+        with open(zip_path, "wb") as fh:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    fh.write(chunk)
+
+        # extract
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        # the zip contains a top-level platform-tools directory; move that into target_dir
+        extracted_dir = os.path.join(tmp_dir, "platform-tools")
+        if not os.path.isdir(extracted_dir):
+            # try to find a platform-tools directory inside temp
+            for entry in os.listdir(tmp_dir):
+                candidate = os.path.join(tmp_dir, entry)
+                if os.path.isdir(candidate) and entry.lower().startswith("platform-tools"):
+                    extracted_dir = candidate
+                    break
+
+        if not os.path.isdir(extracted_dir):
+            raise RuntimeError("Platform-tools not found in archive")
+
+        # Atomic install: move extracted_dir -> target_dir (remove existing backup first)
+        if os.path.isdir(target_dir):
+            backup = f"{target_dir}.bak"
+            shutil.rmtree(backup, ignore_errors=True)
+            shutil.move(target_dir, backup)
+        shutil.move(extracted_dir, target_dir)
+
+        # Ensure adb executable perms on POSIX
+        adb_name = "adb.exe" if sys.platform.startswith("win") else "adb"
+        adb_path = os.path.join(target_dir, adb_name)
+        if os.path.isfile(adb_path) and os.name == "posix":
+            os.chmod(adb_path, 0o755)
+
+        # Atomically update 'current' symlink
+        tmp_link = f"{current_link}.tmp"
+        try:
+            if os.path.exists(tmp_link):
+                os.remove(tmp_link)
+            os.symlink(target_dir, tmp_link)
+            os.replace(tmp_link, current_link)
+        except OSError:
+            # fallback: remove and recreate
+            try:
+                if os.path.exists(current_link):
+                    os.remove(current_link)
+                os.symlink(target_dir, current_link)
+            except Exception:
+                pass
+
+        return adb_path
+    finally:
+        # Clean temp dir
+        try:
+            if os.path.exists(tmp_dir):
+                shutil.rmtree(tmp_dir)
+        except Exception:
+            pass
 
 def get_platform_tools_directory() -> str:
     """Get platform-tools directory."""
@@ -60,7 +197,6 @@ ADB_WIN_ZIP_URL = (
 ADB_LINUX_ZIP_URL = (
     "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 )
-LOCAL_ADB_FOLDER = get_platform_tools_directory()
 OS_TYPE = sys.platform
 
 # Determine ADB binary name based on platform
@@ -71,7 +207,28 @@ elif OS_TYPE.startswith("win"):
 else:
     ADB_BINARY_NAME = "adb"
 
-ADB_BINARY_PATH = os.path.join(LOCAL_ADB_FOLDER, ADB_BINARY_NAME)
+# ADB binary path is resolved at runtime via get_adb_binary_path() to avoid
+# duplicate logic and to centralize platform-tools installation behavior.
+
+
+def get_adb_binary_path() -> str:
+    """Return the path to the adb binary, installing platform-tools if needed.
+
+    This central helper ensures a consistent location across the codebase.
+    """
+    adb_name = "adb.exe" if sys.platform.startswith("win") else "adb"
+    try:
+        # If platform-tools are installed in the user data dir, prefer that
+        adb_path = ensure_platform_tools_in_user_dir()
+        if adb_path and os.path.isfile(adb_path):
+            return adb_path
+    except Exception:
+        pass
+
+    # Fallback: look for an executable next to the project or installed path
+    local_folder = get_platform_tools_directory()
+    candidate = os.path.join(local_folder, adb_name)
+    return candidate
 
 
 class ADBManager:
@@ -103,60 +260,39 @@ class ADBManager:
     def check_local_disk_space(self) -> bool:
         """Check if there's enough disk space for ADB download."""
         try:
-            free_space = shutil.disk_usage(LOCAL_ADB_FOLDER)[2]
+            free_space = shutil.disk_usage(get_platform_tools_directory())[2]
             if free_space < 50 * 1024 * 1024:  # 50MB minimum
                 raise Exception("Insufficient disk space")
             return True
         except OSError:
             # Create directory if it doesn't exist
-            os.makedirs(LOCAL_ADB_FOLDER, exist_ok=True)
+            os.makedirs(get_platform_tools_directory(), exist_ok=True)
             return True
 
     def download_and_extract_adb(self) -> bool:
         """Download and extract ADB tools if not present."""
-        if os.path.isfile(ADB_BINARY_PATH):
-            return True
-
+        # Use the centralized installer which will return the adb path (and
+        # perform a download if needed). If it returns a valid path, report
+        # success; otherwise return False.
         try:
-            # Determine the correct URL based on platform
-            if OS_TYPE.startswith("linux"):
-                adb_zip_url = ADB_LINUX_ZIP_URL
-            elif OS_TYPE.startswith("win"):
-                adb_zip_url = ADB_WIN_ZIP_URL
-            else:
-                print("Unsupported platform")
-                return False
-
-            if not self.check_local_disk_space():
-                return False
-
-            self._update_status("Downloading platform-tools (ADB)...")
-
-            response = requests.get(adb_zip_url, stream=True, timeout=30)
-            response.raise_for_status()
-
-            binary_archive = zipfile.ZipFile(io.BytesIO(response.content))
-            
-            # Extract to parent directory since the zip contains platform-tools/ folder
-            extract_to = os.path.dirname(LOCAL_ADB_FOLDER)
-            os.makedirs(extract_to, exist_ok=True)
-            binary_archive.extractall(extract_to)
-
-            if OS_TYPE.startswith("linux"):
-                if os.path.exists(ADB_BINARY_PATH):
-                    os.chmod(ADB_BINARY_PATH, 0o755)
-                else:
-                    raise Exception("ADB binary not found after extraction")
-
-            self._update_status("Downloaded and extracted platform-tools.")
-            return True
+            adb_path = ensure_platform_tools_in_user_dir()
+            if adb_path and os.path.isfile(adb_path):
+                # Ensure executable permissions on POSIX
+                if os.name == "posix":
+                    try:
+                        os.chmod(adb_path, 0o755)
+                    except Exception:
+                        pass
+                self._update_status("ADB available at: " + adb_path)
+                return True
+            return False
         except Exception as e:
-            print(f"Failed to download ADB: {e}")
+            self._update_status(f"Failed to ensure platform-tools: {e}")
             return False
 
     def run_adb_command(self, args: list, capture_output: bool = True):
         """Run an ADB command and return output."""
-        cmd = [ADB_BINARY_PATH] + args
+        cmd = [get_adb_binary_path()] + args
         try:
             if capture_output:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -223,35 +359,29 @@ class ADBManager:
 
     def pull_folder(self, remote_path: str, local_path: str) -> bool:
         """Pull files from Android device to local machine."""
-        # Normalize paths for better compatibility
+        # Normalize paths and prepare
         local_path = os.path.normpath(local_path)
         remote_path = remote_path.strip()
 
-        # Ensure local directory exists
         try:
             os.makedirs(local_path, exist_ok=True)
         except Exception as e:
             self._update_status(f"Failed to create local directory: {e}")
             return False
 
-        # For Windows root drives, ensure proper formatting
+        # Warn if writing to root drive on Windows
         if os.name == "nt":
-            # Check if this is a root drive (like C:\, D:\, etc.)
             normalized_path = os.path.abspath(local_path)
             drive_root = os.path.splitdrive(normalized_path)[0] + os.sep
             if normalized_path == drive_root:
-                # Root drive path like C:\ - this might cause issues with ADB
                 self._update_status(
                     "Warning: Transferring to root drive. Consider using a subfolder."
                 )
 
-        cmd = [ADB_BINARY_PATH, "pull", remote_path, local_path]
-
-        # Debug output for troubleshooting
+        cmd = [get_adb_binary_path(), "pull", remote_path, local_path]
         self._update_status(f"Command: adb pull '{remote_path}' '{local_path}'")
 
         try:
-            # Start with initial progress
             self._update_progress(0)
             self._update_status("Starting transfer...")
 
@@ -276,45 +406,29 @@ class ADBManager:
                     pct = self.parse_progress(line)
 
                     if pct is not None:
-                        # Use explicit progress when available
                         self._update_progress(pct)
                         last_progress = pct
                         last_update_time = current_time
                     else:
-                        # Improved progress estimation for large transfers
                         elapsed_time = current_time - start_time
                         time_since_last_update = current_time - last_update_time
 
-                        # Calculate progress based on multiple factors
                         should_update = False
                         new_progress = last_progress
 
-                        # Time-based progress (update every 2 seconds)
                         if time_since_last_update >= 2.0 and last_progress < 95:
-                            # Estimate progress based on activity and time
                             if line_count > 100:
-                                # For large transfers, use a logarithmic approach
-                                activity_factor = min(
-                                    line_count / 1000, 50
-                                )  # Max 50% from activity
-                                time_factor = min(
-                                    elapsed_time / 60, 40
-                                )  # Max 40% from time (assumes 1-2 min transfers)
+                                activity_factor = min(line_count / 1000, 50)
+                                time_factor = min(elapsed_time / 60, 40)
                                 new_progress = min(activity_factor + time_factor, 95)
                             else:
-                                # For smaller transfers, use the original approach
                                 new_progress = min(last_progress + 10, 95)
-
                             should_update = True
-
-                        # Line-based progress (for very active transfers)
                         elif line_count % 50 == 0 and last_progress < 90:
-                            # More conservative line-based updates
                             increment = max(1, min(5, 90 // (line_count // 50 + 1)))
                             new_progress = min(last_progress + increment, 90)
                             should_update = True
 
-                        # Update progress if needed
                         if should_update and new_progress > last_progress:
                             self._update_progress(int(new_progress))
                             last_progress = new_progress
@@ -329,19 +443,17 @@ class ADBManager:
                 self.current_process = None
                 return True
             else:
-                # Capture error output for better debugging
                 error_msg = f"Transfer failed with code {proc.returncode}"
                 if hasattr(proc, "stderr") and proc.stderr:
                     try:
                         stderr_output = proc.stderr.read()
                         if stderr_output:
                             error_msg += f". Error: {stderr_output}"
-                    except:
+                    except Exception:
                         pass
                 self._update_status(error_msg)
                 self.current_process = None
                 return False
-
         except Exception as e:
             self._update_status(f"Transfer error: {e}")
             self.current_process = None
@@ -349,33 +461,25 @@ class ADBManager:
 
     def push_folder(self, local_path: str, remote_path: str) -> bool:
         """Push files from local machine to Android device."""
-        # Normalize paths for better compatibility
         local_path = os.path.normpath(local_path)
         remote_path = remote_path.strip()
 
-        # Validate local path exists
         if not os.path.exists(local_path):
             self._update_status(f"Local path does not exist: {local_path}")
             return False
 
-        # For Windows root drives, ensure proper formatting
         if os.name == "nt":
-            # Check if this is a root drive (like C:\, D:\, etc.)
             normalized_path = os.path.abspath(local_path)
             drive_root = os.path.splitdrive(normalized_path)[0] + os.sep
             if normalized_path == drive_root:
-                # Root drive path like C:\ - this might cause issues with ADB
                 self._update_status(
                     "Warning: Pushing from root drive. Consider using a subfolder."
                 )
 
-        cmd = [ADB_BINARY_PATH, "push", local_path, remote_path]
-
-        # Debug output for troubleshooting
+        cmd = [get_adb_binary_path(), "push", local_path, remote_path]
         self._update_status(f"Command: adb push '{local_path}' '{remote_path}'")
 
         try:
-            # Start with initial progress
             self._update_progress(0)
             self._update_status("Starting transfer...")
 
@@ -403,46 +507,13 @@ class ADBManager:
                 pct = self.parse_progress(line)
 
                 if pct is not None:
-                    # Use explicit progress when available
                     self._update_progress(pct)
                     last_progress = pct
                     last_update_time = current_time
                 else:
-                    # Improved progress estimation for large transfers
                     elapsed_time = current_time - start_time
-                    time_since_last_update = current_time - last_update_time
-
-                    # Calculate progress based on multiple factors
-                    should_update = False
-                    new_progress = last_progress
-
-                    # Time-based progress (update every 2 seconds)
-                    if time_since_last_update >= 2.0 and last_progress < 95:
-                        # Estimate progress based on activity and time
-                        if line_count > 100:
-                            # For large transfers, use a logarithmic approach
-                            activity_factor = min(
-                                line_count / 1000, 50
-                            )  # Max 50% from activity
-                            time_factor = min(
-                                elapsed_time / 60, 40
-                            )  # Max 40% from time (assumes 1-2 min transfers)
-                            new_progress = min(activity_factor + time_factor, 95)
-                        else:
-                            # For smaller transfers, use the original approach
-                            new_progress = min(last_progress + 10, 95)
-
-                        should_update = True
-
-                    # Line-based progress (for very active transfers)
-                    elif line_count % 50 == 0 and last_progress < 90:
-                        # More conservative line-based updates
-                        increment = max(1, min(5, 90 // (line_count // 50 + 1)))
-                        new_progress = min(last_progress + increment, 90)
-                        should_update = True
-
-                    # Update progress if needed
-                    if should_update and new_progress > last_progress:
+                    if elapsed_time >= 1.0 and last_progress < 90:
+                        new_progress = min(last_progress + 20, 90)
                         self._update_progress(int(new_progress))
                         last_progress = new_progress
                         last_update_time = current_time
@@ -456,14 +527,13 @@ class ADBManager:
             self.current_process = None
             return True
         else:
-            # Capture error output for better debugging
             error_msg = f"Push failed with code {proc.returncode}"
             if hasattr(proc, "stderr") and proc.stderr:
                 try:
                     stderr_output = proc.stderr.read()
                     if stderr_output:
                         error_msg += f". Error: {stderr_output}"
-                except:
+                except Exception:
                     pass
             self._update_status(error_msg)
             self.current_process = None
@@ -495,7 +565,7 @@ class ADBManager:
                     "Warning: Transferring to root drive. Consider using a subfolder."
                 )
 
-        cmd = [ADB_BINARY_PATH, "pull", remote_file_path, local_file_path]
+        cmd = [get_adb_binary_path(), "pull", remote_file_path, local_file_path]
 
         # Debug output for troubleshooting
         self._update_status(f"Command: adb pull '{remote_file_path}' '{local_file_path}'")
@@ -589,7 +659,7 @@ class ADBManager:
                     "Warning: Pushing from root drive. Consider using a subfolder."
                 )
 
-        cmd = [ADB_BINARY_PATH, "push", local_file_path, remote_file_path]
+        cmd = [get_adb_binary_path(), "push", local_file_path, remote_file_path]
 
         # Debug output for troubleshooting
         self._update_status(f"Command: adb push '{local_file_path}' '{remote_file_path}'")
@@ -680,6 +750,8 @@ class ADBManager:
                 self._update_status(f"Error cancelling transfer: {e}")
                 return False
         return False
+
+    # (Method intentionally removed - use top-level ensure_platform_tools_in_user_dir)
 
 
 class LinuxMTPManager:
@@ -808,14 +880,13 @@ class LinuxMTPManager:
 
 
 # Helper functions for standalone usage
-def get_adb_binary_path() -> str:
-    """Get the path to the ADB binary."""
-    return ADB_BINARY_PATH
-
-
 def is_adb_available() -> bool:
-    """Check if ADB binary is available."""
-    return os.path.isfile(ADB_BINARY_PATH)
+    """Check if ADB binary is available using the centralized resolver."""
+    try:
+        adb_path = get_adb_binary_path()
+        return os.path.isfile(adb_path)
+    except Exception:
+        return False
 
 
 def get_platform_type() -> str:
