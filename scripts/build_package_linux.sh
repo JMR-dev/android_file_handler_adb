@@ -28,7 +28,21 @@ mkdir -p "$PKG_DIR/usr/local/bin" \
 cp dist/android-file-handler "$PKG_DIR/usr/local/bin/android-file-handler"
 chmod 0755 "$PKG_DIR/usr/local/bin/android-file-handler"
 
-# Create .desktop file
+# ...existing code...
+# Copy icon if present in repo (fallback optional) — do this before creating the .desktop
+ICON_SRC="icon_media/robot_files_256.png"
+ICON_DST="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+ICON_INCLUDED=false
+if [ -f "$ICON_SRC" ]; then
+  mkdir -p "$(dirname "$ICON_DST")"
+  cp "$ICON_SRC" "$ICON_DST"
+  chmod 644 "$ICON_DST"
+  ICON_INCLUDED=true
+else
+  echo "Warning: icon not found at $ICON_SRC; packaging without icon"
+fi
+
+# Create .desktop file (icon name matches installed icon)
 cat > "$PKG_DIR/usr/share/applications/android-file-handler.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
@@ -42,14 +56,20 @@ StartupNotify=true
 EOF
 chmod 644 "$PKG_DIR/usr/share/applications/android-file-handler.desktop"
 
-# Copy icon if present in repo (fallback optional)
-if [ -f "assets/icons/android-file-handler-256.png" ]; then
-	cp assets/icons/android-file-handler-256.png "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-	chmod 644 "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+# Build the Debian package and include postinst script
+PKG_ITEMS=( "usr/local/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+if [ "$ICON_INCLUDED" = true ]; then
+  PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
 fi
 
-# Build the Debian package and include postinst script
+# Debug listing
+echo "Packaging the following items (relative to $PKG_DIR):"
+printf ' - %s\n' "${PKG_ITEMS[@]}"
+for p in "${PKG_ITEMS[@]}"; do ls -la "$PKG_DIR/$p" || echo "  (missing) $PKG_DIR/$p"; done
+
 fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
-	--architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
-	--after-install scripts/debian/postinst.sh \
-	-p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" usr/local/bin/android-file-handler usr/share/applications/android-file-handler.desktop usr/share/icons/hicolor/256x256/apps/android-file-handler.png
+  --architecture amd64 --deb-user root --deb-group root \
+  --after-install scripts/linux_postinst.sh \
+  -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+
+echo "Package created at dist/android-file-handler_${VERSION}_amd64.deb"

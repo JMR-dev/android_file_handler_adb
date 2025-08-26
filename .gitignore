@@ -7,6 +7,8 @@ build
 .actrc
 bin/
 test-act.yml
+pkg_dist
+
 # Python cache files
 __pycache__/
 *.py[cod]

@@ -4,7 +4,7 @@
 
 These instructions describe how Arch users can install the Linux build produced by the project's `simple-release.yml` workflow. The workflow produces an Arch package named similar to:
 
-```
+```bash
 android-file-handler-<VERSION>-1-x86_64.pkg.tar.zst
 ```
 
