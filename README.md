@@ -18,7 +18,7 @@ A simple Windows GUI tool to pull folders from an Android device using ADB (Andr
 - [Poetry](https://python-poetry.org/) for dependency management
 - (Optional) pyenv for Python version managment
 
-## Installation
+## Installation (Developers)
 
 1. Clone this repository:
 
