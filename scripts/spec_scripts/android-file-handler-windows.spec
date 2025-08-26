@@ -1,15 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-
-
 block_cipher = None
-
-
 a = Analysis(
     ['src/main.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=[('src/gui', 'gui')],
+    hiddenimports=[
+        'gui',
+        'gui.file_browser',
+        'gui.license_agreement',
+        'gui.main_window',
+        'gui.progress_handler'
+        'adb_manager'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -20,7 +23,6 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
 exe = EXE(
     pyz,
     a.scripts,
@@ -35,10 +37,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='icon_media/robot_files_256.ico',
 )
