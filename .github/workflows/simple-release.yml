@@ -300,23 +300,27 @@ jobs:
       - name: Package RHEL (fpm) inside container
         shell: bash
         run: |
-          set -euo pipefail
-          VERSION="$(poetry version -s)"
-          PKG_DIR="pkg_dist_rhel"
-          mkdir -p dist || true
-          echo "Packaging from $PKG_DIR"
-          ls -la "$PKG_DIR" || true
+          # Run the entire packaging flow inside the Fedora container so Poetry, PATH and arrays are evaluated in-container.
+          docker exec rhel-build bash -lc '
+            set -euo pipefail
+            VERSION="$(/root/.local/bin/poetry version -s)"
+            PKG_DIR="pkg_dist_rhel"
+            mkdir -p dist || true
+            echo "Packaging from $PKG_DIR (version=$VERSION)"
+            ls -la "$PKG_DIR" || true
 
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
+            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+            PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+            if [ -f "$ICON_PATH" ]; then
+              PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
+            else
+              echo "Note: icon not present, packaging without icon"
+            fi
 
-          # Run fpm inside the container to produce an RPM
-          docker exec rhel-build bash -lc "cd /workspace && fpm -s dir -t rpm -n android-file-handler -v \"$VERSION\" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p \"dist/android-file-handler-${VERSION}.x86_64.rpm\" -C \"$PKG_DIR\" ${PKG_ITEMS[@]}"
+            # Run fpm inside the container to produce an RPM
+            cd /workspace
+            exec fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p "dist/android-file-handler-${VERSION}.x86_64.rpm" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+          '
 
       - name: Upload RHEL artifacts
         uses: actions/upload-artifact@v4
