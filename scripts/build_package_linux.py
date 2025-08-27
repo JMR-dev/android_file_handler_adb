@@ -165,8 +165,20 @@ def main():
     is_ci_cd = os.environ.get("CI_CD", "false").lower() == "true"
     
     if is_ci_cd:
-        print("CI/CD mode detected - building for all distributions")
-        selected_distros = [DistroType.DEBIAN, DistroType.ARCH, DistroType.RHEL]
+        distro_env = os.environ.get("DISTRO_TYPE", "").lower()
+        if distro_env == "debian":
+            selected_distros = [DistroType.DEBIAN]
+            print("CI/CD mode detected - building for Debian")
+        elif distro_env == "arch":
+            selected_distros = [DistroType.ARCH]
+            print("CI/CD mode detected - building for Arch")
+        elif distro_env == "rhel":
+            selected_distros = [DistroType.RHEL]
+            print("CI/CD mode detected - building for RHEL")
+        else:
+            print(f"Error: Invalid or missing DISTRO_TYPE environment variable: '{distro_env}'")
+            print("Valid values: debian, arch, rhel")
+            sys.exit(1)
     else:
         selected_distros = prompt_distro_selection()
     

@@ -81,11 +81,14 @@ jobs:
     container:
       image: python:3.12-slim
     steps:
-      - name: Install system dependencies & gem fpm
+      - name: Install system dependencies & gem fpm (include Tcl/Tk)
         run: |
           set -euo pipefail
           apt-get update
-          apt-get install -y --no-install-recommends curl git build-essential ruby ruby-dev gcc make zlib1g-dev ca-certificates
+          # Install Tcl/Tk runtimes, dev headers and common X libraries required by tkinter
+          apt-get install -y --no-install-recommends \
+            curl git build-essential ruby ruby-dev gcc make zlib1g-dev ca-certificates python3-tk \
+            tcl8.6 tk8.6 tcl8.6-dev tk8.6-dev libx11-6 libxext6 libxrender1 libxcb1
           # install pinned fpm to the system gem dir (will be available under gem env's EXECUTABLE DIRECTORY or /usr/local/bin)
           gem install --no-document -v "${FPM_VERSION}" fpm
 
@@ -115,6 +118,9 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           poetry env use python3.12 || true
+          # Debug: show tkinter/_tkinter and Tcl library discovery in the Poetry venv
+          poetry run python -c 'import tkinter, _tkinter, sys; print("tkinter=", getattr(tkinter, "__file__", None)); print("_tkinter=", getattr(_tkinter, "__file__", None)); import tkinter as tk; print("TCL_LIBRARY=", tk.Tcl().eval("info library"))'
+
           # Build distro-specific package layout using the build script via Poetry
           poetry run python scripts/build_package_linux.py
 
@@ -162,10 +168,10 @@ jobs:
         run: |
           set -euo pipefail
           pacman -Syu --noconfirm
-          pacman -S --noconfirm ruby base-devel curl git tar ca-certificates
-          # Install fpm system-wide and pin version so fpm will be in /usr/local/bin
+          pacman -S --noconfirm ruby base-devel curl git tar ca-certificates tk tcl libx11 libxext libxrender libxcb
+          # Install fpm system-wide and pin version so fpm will be in /usr/in
           gem install --no-document erb
-          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/local/bin
+          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/bin
           # persist system bindir to subsequent steps (usually already on PATH)
           echo "/usr/local/bin" >> $GITHUB_PATH
 
@@ -186,19 +192,19 @@ jobs:
 
       - name: Configure Poetry
         run: |
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
-          export PATH="$HOME/.local/bin:$PATH"
+          echo 'export PATH="$HOME/bin:$PATH"' >> $GITHUB_ENV
+          export PATH="$HOME/bin:$PATH"
 
       - name: Install dependencies & build executable
         run: |
-          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          export PATH="$HOME/bin:/usr/bin:$PATH"
           # Use unified build script to produce pkg_dist_arch layout via Poetry
           poetry run python scripts/build_package_linux.py
 
       - name: Package pacman (fpm)
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          export PATH="$HOME/.local/bin:/usr/bin:$PATH"
           VERSION="$(poetry version -s)"
           PKG_DIR="pkg_dist_arch"
           mkdir -p dist
