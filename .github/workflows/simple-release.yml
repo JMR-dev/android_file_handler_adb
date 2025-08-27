@@ -64,6 +64,8 @@ jobs:
           path: dist/android-file-handler.exe
        
   build-debian:
+    env:
+      DISTRO_TYPE: debian
     runs-on: ubuntu-latest
     container:
       image: python:3.12-slim
@@ -102,27 +104,44 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           poetry env use python3.12 || true
-          poetry install
-          # Use the Linux spec file for reproducible builds
-          poetry run pyinstaller scripts/spec_scripts/android-file-handler-linux.spec
+          # Build distro-specific package layout using the build script via Poetry
+          poetry run python scripts/build_package_linux.py
 
       - name: Package .deb (fpm)
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           VERSION="$(poetry version -s)"
+          PKG_DIR="pkg_dist_debian"
           mkdir -p dist
-          chmod +x dist/android-file-handler
-          # explicit filename into dist/
-          fpm -s dir -t deb -n android-file-handler -v "$VERSION" --architecture amd64 --prefix /usr/local/bin -p "dist/android-file-handler_${VERSION}_amd64.deb" dist/android-file-handler
+          # Debug listing
+          echo "Packaging from $PKG_DIR"
+          ls -la "$PKG_DIR" || true
+
+          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+          PKG_ITEMS=( "usr/local/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+          if [ -f "$ICON_PATH" ]; then
+            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
+          else
+            echo "Note: icon not present, packaging without icon"
+          fi
+
+          fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
+            --architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
+            --after-install scripts/debian/postinst.sh \
+            -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload Debian .deb
         uses: actions/upload-artifact@v4
         with:
           name: debian-package
-          path: dist/android-file-handler_*.deb
+          path: |
+            dist/android-file-handler_*.deb
+            pkg_dist_debian/**
 
   build-arch:
+    env:
+      DISTRO_TYPE: arch
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -161,25 +180,118 @@ jobs:
       - name: Install dependencies & build executable
         run: |
           export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
-          poetry install
-          # Use the Linux spec file for reproducible builds on Arch
-          poetry run pyinstaller scripts/spec_scripts/android-file-handler-linux.spec
+          # Use unified build script to produce pkg_dist_arch layout via Poetry
+          poetry run python scripts/build_package_linux.py
 
       - name: Package pacman (fpm)
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           VERSION="$(poetry version -s)"
+          PKG_DIR="pkg_dist_arch"
           mkdir -p dist
-          chmod +x dist/android-file-handler
-          # explicit filename into dist/
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
+          echo "Packaging from $PKG_DIR"
+          ls -la "$PKG_DIR" || true
+
+          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+          if [ -f "$ICON_PATH" ]; then
+            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
+          else
+            echo "Note: icon not present, packaging without icon"
+          fi
+
+          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+            --architecture x86_64 --prefix /usr/bin \
+            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
         with:
           name: arch-package
-          path: dist/*.pkg.tar.*
+          path: |
+            dist/*.pkg.tar.*
+            pkg_dist_arch/**
+
+
+  build-rhel:
+    env:
+      DISTRO_TYPE: rhel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update OS and install Docker
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release docker.io git build-essential
+          sudo usermod -aG docker $USER || true
+
+      - name: Pull Fedora container image
+        run: |
+          docker pull fedora:latest
+
+      - name: Start Fedora container (background) and mount repo
+        run: |
+          # Run container with workspace mounted
+          docker run -d --name rhel-build -v "$PWD":/workspace -w /workspace fedora:latest sleep infinity
+
+      - name: Prepare container build environment (dnf, pyenv, python, poetry, fpm)
+        run: |
+          set -euo pipefail
+          # Update the Fedora image and install build deps
+          docker exec rhel-build bash -lc "dnf -y update && dnf -y install gcc make zlib-devel bzip2 bzip2-devel readline-devel sqlite-devel openssl-devel libffi-devel wget tar git curl ruby rubygems rpm-build redhat-rpm-config gcc-c++ patch which" 
+
+          # Install pyenv into the container
+          docker exec rhel-build bash -lc "git clone https://github.com/pyenv/pyenv.git ~/.pyenv || true && mkdir -p ~/.pyenv/plugins && git clone https://github.com/pyenv/pyenv-build.git ~/.pyenv/plugins/python-build || true"
+
+          # Install Python 3.12 via pyenv and set global
+          docker exec rhel-build bash -lc "export PATH=\"$HOME/.pyenv/bin:$PATH\" && export PYENV_ROOT=\"$HOME/.pyenv\" && eval \"$(pyenv init -)\" || true && ~/.pyenv/bin/pyenv install -s 3.12.0 && ~/.pyenv/bin/pyenv global 3.12.0"
+
+          # Install Poetry inside the container using the official installer
+          docker exec rhel-build bash -lc "export PATH=\"$HOME/.pyenv/shims:$HOME/.pyenv/bin:$PATH\" && curl -sSL https://install.python-poetry.org | python3 - --yes"
+
+          # Ensure poetry is on PATH for subsequent commands
+          docker exec rhel-build bash -lc "export PATH=\"$HOME/.local/bin:$HOME/.pyenv/shims:$HOME/.pyenv/bin:$PATH\" && poetry --version"
+
+          # Install fpm (Ruby gem) and ensure rpm build tools exist
+          docker exec rhel-build bash -lc "dnf -y install ruby rubygems make && gem install --no-document -v \"${FPM_VERSION}\" fpm"
+
+      - name: Build inside container using Poetry
+        run: |
+          set -euo pipefail
+          # Use poetry inside the container to build package layouts
+          docker exec rhel-build bash -lc "export PATH=\"$HOME/.local/bin:$HOME/.pyenv/shims:$HOME/.pyenv/bin:$PATH\" && cd /workspace && poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
+
+      - name: Package RHEL (fpm) inside container
+        run: |
+          set -euo pipefail
+          VERSION="$(poetry version -s)"
+          PKG_DIR="pkg_dist_rhel"
+          mkdir -p dist || true
+          echo "Packaging from $PKG_DIR"
+          ls -la "$PKG_DIR" || true
+
+          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+          if [ -f "$ICON_PATH" ]; then
+            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
+          else
+            echo "Note: icon not present, packaging without icon"
+          fi
+
+          # Run fpm inside the container to produce an RPM
+          docker exec rhel-build bash -lc "cd /workspace && fpm -s dir -t rpm -n android-file-handler -v \"$VERSION\" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p \"dist/android-file-handler-${VERSION}.x86_64.rpm\" -C \"$PKG_DIR\" ${PKG_ITEMS[@]}"
+
+      - name: Upload RHEL artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhel-package
+          path: |
+            dist/*.rpm
+            pkg_dist_rhel/**
 
 
     
