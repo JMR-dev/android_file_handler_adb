@@ -295,7 +295,7 @@ jobs:
           set -euo pipefail
           # Use poetry inside the container to build package layouts. Use explicit paths so the runner shell
           # doesn't expand $HOME; expansion should occur inside the container.
-          docker exec rhel-build bash -lc 'export PATH="/root/.local/bin:/root/.pyenv/shims:/root/.pyenv/bin:$PATH" && cd /workspace && /root/.local/bin/poetry install --no-interaction && /root/.local/bin/poetry run python scripts/build_package_linux.py'
+          docker exec rhel-build bash -lc 'export PATH="/root/.local/bin:/root/.pyenv/shims:/root/.pyenv/bin:$PATH"; export CI_CD=true; export DISTRO_TYPE=rhel; cd /workspace && /root/.local/bin/poetry install --no-interaction && /root/.local/bin/poetry run python scripts/build_package_linux.py'
 
       - name: Package RHEL (fpm) inside container
         shell: bash
