@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
 a = Analysis(
-    ['src/main.py'],
-    pathex=['src'],
+    ['../src/main.py'],
+    pathex=['..'],
     binaries=[],
     datas=[('src/gui', 'gui'), ('../scripts/windows/first_run_install.ps1', 'scripts/windows')],
     hiddenimports=[
@@ -10,7 +10,7 @@ a = Analysis(
         'gui.file_browser',
         'gui.license_agreement',
         'gui.main_window',
-        'gui.progress_handler'
+        'gui.progress_handler',
         'adb_manager'
     ],
     hookspath=[],
