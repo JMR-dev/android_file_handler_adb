@@ -20,6 +20,7 @@ env:
   FPM_VERSION: "1.16.0"
   # Personal Access Token for HTTPS git operations (populate in repository secrets)
   CI_CD_PAT: ${{ secrets.CI_CD_PAT }}
+  CI_CD: true
 
 jobs:
   build-windows:
@@ -61,7 +62,7 @@ jobs:
         with:
           name: windows-binary
           path: dist/android-file-handler.exe
-
+       
   build-debian:
     runs-on: ubuntu-latest
     container:
@@ -172,7 +173,7 @@ jobs:
           mkdir -p dist
           chmod +x dist/android-file-handler
           # explicit filename into dist/
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/local/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
+          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" dist/android-file-handler
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
@@ -220,3 +221,40 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  sync-wiki:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout wiki repo
+        run: |
+          git clone "https://github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+
+      - name: Sync WIKI.md to Wiki/Home.md
+        run: |
+          set -e
+          SRC_FILE="WIKI.md"
+          DEST_FILE="wiki/Home.md"
+
+          if [ ! -f "$SRC_FILE" ]; then
+            echo "No $SRC_FILE in main repo; skipping."
+            exit 0
+          fi
+
+          if ! cmp -s "$SRC_FILE" "$DEST_FILE"; then
+            echo "Changes found, updating wiki..."
+            cp "$SRC_FILE" "$DEST_FILE"
+            cd wiki
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Home.md
+            git commit -m "Sync WIKI.md from main repo [skip ci]" || echo "No changes to commit"
+            git push
+          else
+            echo "No changes in $SRC_FILE; wiki is up to date."
+          fi
