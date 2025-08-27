@@ -1,5 +1,5 @@
 platform-tools**
-dist/
+dist*
 build_temp/
 build
 *.ini
@@ -7,7 +7,7 @@ build
 .actrc
 bin/
 test-act.yml
-pkg_dist
+pkg_dist*
 
 # Python cache files
 __pycache__/
