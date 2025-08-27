@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
-a = Analysis(
-    ['../src/main.py'],
-    pathex=['..'],
-    binaries=[],
-    datas=[('src/gui', 'gui'), ('../scripts/windows/first_run_install.ps1', 'scripts/windows')],
+ a = Analysis(
+     ['../../src/main.py'],
+     pathex=['../..'],
+     binaries=[],
+     datas=[('../../src/gui', 'gui'), ('../windows/first_run_install.ps1', 'scripts/windows')],
     hiddenimports=[
         'gui',
         'gui.file_browser',
@@ -43,5 +43,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon_media/robot_files_256.ico',
+    icon='../../icon_media/robot_files_256.ico',
 )
