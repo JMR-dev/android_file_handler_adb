@@ -146,7 +146,7 @@ jobs:
 
           fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
             --architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
-            --after-install scripts/debian/postinst.sh \
+            --after-install scripts/debian_postinst.sh \
             -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload Debian .deb
