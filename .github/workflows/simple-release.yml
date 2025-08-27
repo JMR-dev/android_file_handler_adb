@@ -271,19 +271,19 @@ jobs:
         run: |
           set -euo pipefail
           # Update the Fedora image and install build deps
-          docker exec rhel-build bash -lc "dnf -y update && dnf -y install gcc make zlib-devel bzip2 bzip2-devel readline-devel sqlite-devel openssl-devel libffi-devel wget tar git curl ruby rubygems rpm-build redhat-rpm-config gcc-c++ patch which" 
+          docker exec rhel-build bash -lc "dnf -y update && dnf -y install gcc make zlib-devel bzip2 bzip2-devel readline-devel sqlite-devel openssl-devel libffi-devel wget tar git curl ruby rubygems rpm-build redhat-rpm-config gcc-c++ patch which xz-devel" 
 
-          # Install pyenv into the container
-          docker exec rhel-build bash -lc "git clone https://github.com/pyenv/pyenv.git ~/.pyenv || true && mkdir -p ~/.pyenv/plugins && git clone https://github.com/pyenv/pyenv-build.git ~/.pyenv/plugins/python-build || true"
+          # Install pyenv into the container (if not present)
+          docker exec rhel-build bash -lc "[ -d \"/root/.pyenv\" ] || git clone https://github.com/pyenv/pyenv.git /root/.pyenv && mkdir -p /root/.pyenv/plugins && [ -d \"/root/.pyenv/plugins/python-build\" ] || git clone https://github.com/pyenv/pyenv-build.git /root/.pyenv/plugins/python-build"
 
-          # Install Python 3.12 via pyenv and set global
-          docker exec rhel-build bash -lc "export PATH=\"$HOME/.pyenv/bin:$PATH\" && export PYENV_ROOT=\"$HOME/.pyenv\" && eval \"$(pyenv init -)\" || true && ~/.pyenv/bin/pyenv install -s 3.12.0 && ~/.pyenv/bin/pyenv global 3.12.0"
+          # Install Python 3.12 via pyenv and set global using explicit pyenv binary path
+          docker exec rhel-build bash -lc "export PYENV_ROOT=\"/root/.pyenv\"; export PATH=\"$PYENV_ROOT/bin:$PATH\"; $PYENV_ROOT/bin/pyenv install -s 3.12.0; $PYENV_ROOT/bin/pyenv global 3.12.0; $PYENV_ROOT/bin/pyenv rehash"
 
-          # Install Poetry inside the container using the official installer
-          docker exec rhel-build bash -lc "export PATH=\"$HOME/.pyenv/shims:$HOME/.pyenv/bin:$PATH\" && curl -sSL https://install.python-poetry.org | python3 - --yes"
+          # Install Poetry inside the container using the official installer (install to /root/.local/bin)
+          docker exec rhel-build bash -lc "export PATH=\"/root/.pyenv/shims:/root/.pyenv/bin:$PATH\"; curl -sSL https://install.python-poetry.org | python3 - --yes"
 
-          # Ensure poetry is on PATH for subsequent commands
-          docker exec rhel-build bash -lc "export PATH=\"$HOME/.local/bin:$HOME/.pyenv/shims:$HOME/.pyenv/bin:$PATH\" && poetry --version"
+          # Verify Poetry is available via explicit path if not on PATH
+          docker exec rhel-build bash -lc "/root/.local/bin/poetry --version || echo 'Poetry not found in /root/.local/bin'"
 
           # Install fpm (Ruby gem) and ensure rpm build tools exist
           docker exec rhel-build bash -lc "dnf -y install ruby rubygems make && gem install --no-document -v \"${FPM_VERSION}\" fpm"
