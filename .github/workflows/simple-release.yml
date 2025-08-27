@@ -11,6 +11,15 @@ name: Build Multi-Platform Binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Comma-separated jobs to run (e.g., build-windows,build-debian,build-arch,build-rhel)"
+        required: true
+        default: "build-windows,build-debian,build-arch,build-rhel"
+      DO_RELEASE:
+        description: "Set to 'true' to create a GitHub release after successful builds"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -24,6 +33,7 @@ env:
 
 jobs:
   build-windows:
+    if: contains(github.event.inputs.jobs, 'build-windows')
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -64,6 +74,7 @@ jobs:
           path: dist/android-file-handler.exe
        
   build-debian:
+    if: contains(github.event.inputs.jobs, 'build-debian')
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
@@ -140,6 +151,7 @@ jobs:
             pkg_dist_debian/**
 
   build-arch:
+    if: contains(github.event.inputs.jobs, 'build-arch')
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
@@ -215,6 +227,7 @@ jobs:
 
 
   build-rhel:
+    if: contains(github.event.inputs.jobs, 'build-rhel')
     env:
       DISTRO_TYPE: rhel
     runs-on: ubuntu-latest
@@ -296,7 +309,8 @@ jobs:
 
     
   create-release:
-    needs: [build-windows, build-debian, build-arch]
+    needs: [build-windows, build-debian, build-arch, build-rhel]
+    if: ${{ github.event.inputs.DO_RELEASE == 'true' && needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
