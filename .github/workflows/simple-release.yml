@@ -277,7 +277,8 @@ jobs:
           docker exec rhel-build bash -lc "[ -d \"/root/.pyenv\" ] || git clone https://github.com/pyenv/pyenv.git /root/.pyenv && mkdir -p /root/.pyenv/plugins && [ -d \"/root/.pyenv/plugins/python-build\" ] || git clone https://github.com/pyenv/pyenv-build.git /root/.pyenv/plugins/python-build"
 
           # Install Python 3.12 via pyenv and set global using explicit pyenv binary path
-          docker exec rhel-build bash -lc "export PYENV_ROOT=\"/root/.pyenv\"; export PATH=\"$PYENV_ROOT/bin:$PATH\"; $PYENV_ROOT/bin/pyenv install -s 3.12.0; $PYENV_ROOT/bin/pyenv global 3.12.0; $PYENV_ROOT/bin/pyenv rehash"
+          # Use single quotes so $PYENV_ROOT and $PATH are expanded inside the container's shell
+          docker exec rhel-build bash -lc 'export PYENV_ROOT="/root/.pyenv"; export PATH="$PYENV_ROOT/bin:$PATH"; /root/.pyenv/bin/pyenv install -s 3.12.0; /root/.pyenv/bin/pyenv global 3.12.0; /root/.pyenv/bin/pyenv rehash'
 
           # Install Poetry inside the container using the official installer (install to /root/.local/bin)
           docker exec rhel-build bash -lc "export PATH=\"/root/.pyenv/shims:/root/.pyenv/bin:$PATH\"; curl -sSL https://install.python-poetry.org | python3 - --yes"
