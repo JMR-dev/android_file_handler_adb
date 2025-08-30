@@ -20,6 +20,10 @@ on:
         description: "Set to 'true' to create a GitHub release after successful builds"
         required: false
         default: "false"
+      UPLOAD_S3:
+        description: "Set to 'true' to upload build artifacts to S3 after builds"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -373,6 +377,42 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-s3:
+    needs: [build-windows, build-debian, build-arch, build-rhel]
+    if: ${{ github.event.inputs.UPLOAD_S3 == 'true' || contains(github.event.inputs.jobs, 'upload-s3') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install AWS CLI
+        run: |
+          python -m pip install --upgrade pip awscli
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./binaries
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload artifacts to S3
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.S3_BUCKET }}" ]; then
+            echo "S3_BUCKET secret not set; skipping upload"
+            exit 0
+          fi
+          aws s3 sync ./binaries s3://${{ secrets.S3_BUCKET }}/builds/${{ github.run_id }}/ --acl private
+        env:
+          AWS_PAGER: ""
   
   sync-wiki:
     needs: create-release
