@@ -18,6 +18,8 @@ import tempfile
 from typing import Optional
 import hashlib
 
+from file_deduplication import FileDeduplicator
+
 def get_executable_directory() -> str:
     """Get the directory containing the executable or script."""
     if getattr(sys, 'frozen', False):
@@ -238,6 +240,10 @@ class ADBManager:
         self.progress_callback: Optional[Callable[[int], None]] = None
         self.status_callback: Optional[Callable[[str], None]] = None
         self.current_process: Optional[subprocess.Popen] = None
+        self.deduplicator = FileDeduplicator(
+            status_callback=self._update_status,
+            progress_callback=self._update_progress
+        )
 
     def set_progress_callback(self, callback: Callable[[int], None]):
         """Set callback function for progress updates."""
@@ -752,6 +758,175 @@ class ADBManager:
         return False
 
     # (Method intentionally removed - use top-level ensure_platform_tools_in_user_dir)
+
+    def pull_folder_with_dedup(self, remote_path: str, local_path: str) -> Tuple[bool, dict]:
+        """Pull files from Android device with duplicate detection.
+        
+        Args:
+            remote_path: Source path on Android device
+            local_path: Destination path on local machine
+            
+        Returns:
+            Tuple of (success, stats_dict) where stats_dict contains:
+            - 'transferred': number of files transferred
+            - 'skipped': number of duplicate files skipped
+            - 'bytes_saved': bytes saved by skipping duplicates
+            - 'total_files': total files found
+        """
+        stats = {
+            'transferred': 0,
+            'skipped': 0,
+            'bytes_saved': 0,
+            'total_files': 0
+        }
+            
+        try:
+            # Create local directory
+            os.makedirs(local_path, exist_ok=True)
+            
+            # Get list of remote files
+            stdout, stderr, returncode = self.run_adb_command(['shell', 'find', remote_path, '-type', 'f'], capture_output=True)
+            
+            if returncode != 0:
+                self._update_status(f"Failed to list remote files: {stderr}")
+                return False, stats
+                
+            remote_files = [line.strip() for line in stdout.splitlines() if line.strip()]
+            stats['total_files'] = len(remote_files)
+            
+            if not remote_files:
+                self._update_status("No files found in remote directory")
+                return True, stats
+                
+            # Build list of existing local files
+            local_files = []
+            for root, dirs, files in os.walk(local_path):
+                for file_name in files:
+                    local_files.append(os.path.join(root, file_name))
+            
+            # Find duplicates using deduplicator
+            files_to_transfer, duplicate_files = self.deduplicator.find_duplicate_files(
+                source_files=remote_files,
+                target_files=local_files,
+                is_remote_source=True,
+                is_remote_target=False,
+                adb_command_runner=self.run_adb_command
+            )
+            
+            stats['skipped'] = len(duplicate_files)
+            
+            if duplicate_files:
+                bytes_saved, files_saved = self.deduplicator.calculate_transfer_savings(
+                    duplicate_files, is_remote=True, adb_command_runner=self.run_adb_command
+                )
+                stats['bytes_saved'] = bytes_saved
+                self._update_status(f"Skipping {files_saved} duplicates, saving {self.deduplicator.format_bytes(bytes_saved)}")
+            
+            # Transfer non-duplicate files
+            if files_to_transfer:
+                success = self.pull_folder(remote_path, local_path)
+                if success:
+                    stats['transferred'] = len(files_to_transfer)
+                return success, stats
+            else:
+                self._update_status("All files already exist locally - no transfer needed")
+                return True, stats
+                
+        except Exception as exception:
+            self._update_status(f"Error during deduplication check: {exception}")
+            return False, stats
+
+    def push_folder_with_dedup(self, local_path: str, remote_path: str) -> Tuple[bool, dict]:
+        """Push files to Android device with duplicate detection.
+        
+        Args:
+            local_path: Source path on local machine
+            remote_path: Destination path on Android device
+            
+        Returns:
+            Tuple of (success, stats_dict) where stats_dict contains:
+            - 'transferred': number of files transferred
+            - 'skipped': number of duplicate files skipped
+            - 'bytes_saved': bytes saved by skipping duplicates
+            - 'total_files': total files found
+        """
+        stats = {
+            'transferred': 0,
+            'skipped': 0,
+            'bytes_saved': 0,
+            'total_files': 0
+        }
+            
+        try:
+            if not os.path.exists(local_path):
+                self._update_status(f"Local path does not exist: {local_path}")
+                return False, stats
+                
+            # Get list of local files
+            local_files = []
+            for root, dirs, files in os.walk(local_path):
+                for file_name in files:
+                    local_files.append(os.path.join(root, file_name))
+                    
+            stats['total_files'] = len(local_files)
+            
+            if not local_files:
+                self._update_status("No files found in local directory")
+                return True, stats
+                
+            # Get list of remote files
+            stdout, stderr, returncode = self.run_adb_command(['shell', 'find', remote_path, '-type', 'f'], capture_output=True)
+            
+            remote_files = []
+            if returncode == 0 and stdout:
+                remote_files = [line.strip() for line in stdout.splitlines() if line.strip()]
+            
+            # Find duplicates using deduplicator
+            files_to_transfer, duplicate_files = self.deduplicator.find_duplicate_files(
+                source_files=local_files,
+                target_files=remote_files,
+                is_remote_source=False,
+                is_remote_target=True,
+                adb_command_runner=self.run_adb_command
+            )
+            
+            stats['skipped'] = len(duplicate_files)
+            
+            if duplicate_files:
+                bytes_saved, files_saved = self.deduplicator.calculate_transfer_savings(
+                    duplicate_files, is_remote=False
+                )
+                stats['bytes_saved'] = bytes_saved
+                self._update_status(f"Skipping {files_saved} duplicates, saving {self.deduplicator.format_bytes(bytes_saved)}")
+            
+            # Transfer non-duplicate files
+            if files_to_transfer:
+                success = self.push_folder(local_path, remote_path)
+                if success:
+                    stats['transferred'] = len(files_to_transfer)
+                return success, stats
+            else:
+                self._update_status("All files already exist remotely - no transfer needed")
+                return True, stats
+                
+        except Exception as exception:
+            self._update_status(f"Error during deduplication check: {exception}")
+            return False, stats
+
+    def check_files_identical(self, local_path: str, remote_path: str, algorithm: str = 'sha256') -> bool:
+        """Check if local and remote files are identical by comparing hashes.
+        
+        Args:
+            local_path: Path to the local file
+            remote_path: Path to the remote file
+            algorithm: Hash algorithm to use
+            
+        Returns:
+            True if files are identical, False otherwise
+        """
+        return self.deduplicator.check_files_identical(
+            local_path, remote_path, self.run_adb_command, algorithm
+        )
 
 
 class LinuxMTPManager:

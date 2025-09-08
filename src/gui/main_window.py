@@ -830,14 +830,25 @@ class AndroidFileHandlerGUI(tk.Tk):
                 filename = source_path.split("/")[-1]
                 full_dest_path = os.path.join(dest_path, filename)
                 success = transfer_method(source_path, full_dest_path)
+                stats = None  # File transfers don't return stats
             else:
-                success = transfer_method(source_path, dest_path)
+                # For folder transfers, the method returns (success, stats)
+                if transfer_type == "folder":
+                    success, stats = transfer_method(source_path, dest_path)
+                else:
+                    success = transfer_method(source_path, dest_path)
+                    stats = None
             
             if success and self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
                 transfer_desc = "File" if is_file else "Folder"
                 self._update_status(f"{transfer_desc} transfer completed successfully. To start another transfer, please select another file or folder.")
                 self.show_disable_debugging_reminder()
+                
+                # Show transfer statistics for folder transfers
+                if stats is not None:
+                    self.after(0, lambda: self._show_transfer_stats(stats, direction.capitalize()))
+                
                 # Clear paths and disable button for next transfer
                 self.after(0, self._clear_paths_and_disable_button)
         except Exception as e:
@@ -859,11 +870,13 @@ class AndroidFileHandlerGUI(tk.Tk):
             if self.current_transfer_id != transfer_id:
                 return
 
-            success = self.adb_manager.pull_folder(remote_path, local_path)
+            success, stats = self.adb_manager.pull_folder_with_dedup(remote_path, local_path)
             if success and self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
                 self._update_status("Transfer completed successfully. To start another transfer, please select another file or folder.")
                 self.show_disable_debugging_reminder()
+                # Show transfer statistics
+                self.after(0, lambda: self._show_transfer_stats(stats, "Pull"))
                 # Clear paths and disable button for next transfer
                 self.after(0, self._clear_paths_and_disable_button)
         except Exception as e:
@@ -884,11 +897,13 @@ class AndroidFileHandlerGUI(tk.Tk):
             if self.current_transfer_id != transfer_id:
                 return
 
-            success = self.adb_manager.push_folder(local_path, remote_path)
+            success, stats = self.adb_manager.push_folder_with_dedup(local_path, remote_path)
             if success and self.current_transfer_id == transfer_id:
                 self._stop_transfer_animation()
                 self._update_status("Transfer completed successfully.")
                 self.show_disable_debugging_reminder()
+                # Show transfer statistics
+                self.after(0, lambda: self._show_transfer_stats(stats, "Push"))
                 # Clear paths and disable button for next transfer
                 self.after(0, self._clear_paths_and_disable_button)
         except Exception as e:
@@ -943,12 +958,12 @@ class AndroidFileHandlerGUI(tk.Tk):
             if is_file:
                 return self.adb_manager.pull_file, "file"
             else:
-                return self.adb_manager.pull_folder, "folder"
+                return self.adb_manager.pull_folder_with_dedup, "folder"
         else:  # push
             if is_file:
                 return self.adb_manager.push_file, "file"
             else:
-                return self.adb_manager.push_folder, "folder"
+                return self.adb_manager.push_folder_with_dedup, "folder"
 
     def report_error(self, message: str):
         """Report an error to the user (thread-safe)."""
@@ -960,6 +975,43 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.status_label.config(text=f"Error: {message}")
         messagebox.showerror("Error", message)
         self.enable_controls()
+
+    def _show_transfer_stats(self, stats: dict, operation: str):
+        """Show transfer statistics dialog.
+        
+        Args:
+            stats: Dictionary containing transfer statistics
+            operation: Type of operation ("Pull" or "Push")
+        """
+        # Format bytes saved
+        bytes_saved_str = ""
+        if stats['bytes_saved'] > 0:
+            # Use the deduplicator's format_bytes method
+            if hasattr(self.adb_manager, 'deduplicator'):
+                bytes_saved_str = f" ({self.adb_manager.deduplicator.format_bytes(stats['bytes_saved'])} saved)"
+            else:
+                bytes_saved_str = f" ({stats['bytes_saved']} bytes saved)"
+        
+        # Build message
+        title = f"{operation} Transfer Complete"
+        
+        if stats['total_files'] == 0:
+            message = "No files were found to transfer."
+        else:
+            message_parts = [
+                f"Transfer completed successfully!\n",
+                f"Files found: {stats['total_files']}",
+                f"Files transferred: {stats['transferred']}",
+                f"Duplicate files skipped: {stats['skipped']}{bytes_saved_str}"
+            ]
+            
+            if stats['skipped'] > 0:
+                message_parts.append(f"\nDuplicate detection helped avoid unnecessary transfers!")
+            
+            message = "\n".join(message_parts)
+        
+        # Show dialog
+        messagebox.showinfo(title, message)
 
     def on_close(self):
         """Handle window close event."""
