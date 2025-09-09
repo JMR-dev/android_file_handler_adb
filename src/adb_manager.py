@@ -18,7 +18,10 @@ import tempfile
 from typing import Optional
 import hashlib
 
-from file_deduplication import FileDeduplicator
+try:
+    from file_deduplication import FileDeduplicator
+except ImportError:
+    from .file_deduplication import FileDeduplicator
 
 def get_executable_directory() -> str:
     """Get the directory containing the executable or script."""
@@ -244,6 +247,12 @@ class ADBManager:
             status_callback=self._update_status,
             progress_callback=self._update_progress
         )
+        # Transfer progress tracking
+        self.transfer_progress = {
+            'current_file': 0,
+            'total_files': 0,
+            'files_to_transfer': 0
+        }
 
     def set_progress_callback(self, callback: Callable[[int], None]):
         """Set callback function for progress updates."""
@@ -262,6 +271,23 @@ class ADBManager:
         """Internal method to update status."""
         if self.status_callback:
             self.status_callback(message)
+
+    def _update_transfer_progress(self, current_file: int, total_files: int):
+        """Update transfer progress for file counting."""
+        self.transfer_progress['current_file'] = current_file
+        self.transfer_progress['total_files'] = total_files
+        # Send progress update through status callback with special format
+        progress_message = f"TRANSFER_PROGRESS:{current_file}:{total_files}"
+        if self.status_callback:
+            self.status_callback(progress_message)
+
+    def _reset_transfer_progress(self):
+        """Reset transfer progress counters."""
+        self.transfer_progress = {
+            'current_file': 0,
+            'total_files': 0,
+            'files_to_transfer': 0
+        }
 
     def check_local_disk_space(self) -> bool:
         """Check if there's enough disk space for ADB download."""
@@ -384,6 +410,9 @@ class ADBManager:
                     "Warning: Transferring to root drive. Consider using a subfolder."
                 )
 
+        # Reset transfer progress
+        self._reset_transfer_progress()
+
         cmd = [get_adb_binary_path(), "pull", remote_path, local_path]
         self._update_status(f"Command: adb pull '{remote_path}' '{local_path}'")
 
@@ -404,11 +433,29 @@ class ADBManager:
             last_progress = 0
             start_time = time.time()
             last_update_time = start_time
+            files_transferred = 0
 
             if proc.stdout:
                 for line in proc.stdout:
                     line_count += 1
                     current_time = time.time()
+                    
+                    # Check for file completion patterns in ADB output
+                    if ": 1 file pulled" in line or "files pulled" in line:
+                        # Extract number of files from the line
+                        if "1 file pulled" in line:
+                            files_transferred += 1
+                        else:
+                            # Parse "X files pulled" pattern
+                            import re
+                            match = re.search(r'(\d+) files pulled', line)
+                            if match:
+                                files_transferred = int(match.group(1))
+                        
+                        # Update file transfer progress
+                        if self.transfer_progress['files_to_transfer'] > 0:
+                            self._update_transfer_progress(files_transferred, self.transfer_progress['files_to_transfer'])
+                    
                     pct = self.parse_progress(line)
 
                     if pct is not None:
@@ -482,6 +529,9 @@ class ADBManager:
                     "Warning: Pushing from root drive. Consider using a subfolder."
                 )
 
+        # Reset transfer progress
+        self._reset_transfer_progress()
+
         cmd = [get_adb_binary_path(), "push", local_path, remote_path]
         self._update_status(f"Command: adb push '{local_path}' '{remote_path}'")
 
@@ -505,11 +555,29 @@ class ADBManager:
         last_progress = 0
         start_time = time.time()
         last_update_time = start_time
+        files_transferred = 0
 
         if proc.stdout:
             for line in proc.stdout:
                 line_count += 1
                 current_time = time.time()
+                
+                # Check for file completion patterns in ADB output
+                if ": 1 file pushed" in line or "files pushed" in line:
+                    # Extract number of files from the line
+                    if "1 file pushed" in line:
+                        files_transferred += 1
+                    else:
+                        # Parse "X files pushed" pattern
+                        import re
+                        match = re.search(r'(\d+) files pushed', line)
+                        if match:
+                            files_transferred = int(match.group(1))
+                    
+                    # Update file transfer progress
+                    if self.transfer_progress['files_to_transfer'] > 0:
+                        self._update_transfer_progress(files_transferred, self.transfer_progress['files_to_transfer'])
+                
                 pct = self.parse_progress(line)
 
                 if pct is not None:
@@ -571,6 +639,10 @@ class ADBManager:
                     "Warning: Transferring to root drive. Consider using a subfolder."
                 )
 
+        # Set file count for single file transfer
+        self.transfer_progress['files_to_transfer'] = 1
+        self._update_transfer_progress(0, 1)
+
         cmd = [get_adb_binary_path(), "pull", remote_file_path, local_file_path]
 
         # Debug output for troubleshooting
@@ -599,6 +671,11 @@ class ADBManager:
                 for line in proc.stdout:
                     line_count += 1
                     current_time = time.time()
+                    
+                    # Check for file completion
+                    if "1 file pulled" in line:
+                        self._update_transfer_progress(1, 1)
+                    
                     pct = self.parse_progress(line)
 
                     if pct is not None:
@@ -665,6 +742,10 @@ class ADBManager:
                     "Warning: Pushing from root drive. Consider using a subfolder."
                 )
 
+        # Set file count for single file transfer
+        self.transfer_progress['files_to_transfer'] = 1
+        self._update_transfer_progress(0, 1)
+
         cmd = [get_adb_binary_path(), "push", local_file_path, remote_file_path]
 
         # Debug output for troubleshooting
@@ -696,6 +777,11 @@ class ADBManager:
             for line in proc.stdout:
                 line_count += 1
                 current_time = time.time()
+                
+                # Check for file completion
+                if "1 file pushed" in line:
+                    self._update_transfer_progress(1, 1)
+                
                 pct = self.parse_progress(line)
 
                 if pct is not None:
@@ -784,6 +870,9 @@ class ADBManager:
             # Create local directory
             os.makedirs(local_path, exist_ok=True)
             
+            # Start duplicate scanning
+            self._update_status("Scanning for duplicates...")
+            
             # Get list of remote files
             stdout, stderr, returncode = self.run_adb_command(['shell', 'find', remote_path, '-type', 'f'], capture_output=True)
             
@@ -820,10 +909,15 @@ class ADBManager:
                     duplicate_files, is_remote=True, adb_command_runner=self.run_adb_command
                 )
                 stats['bytes_saved'] = bytes_saved
-                self._update_status(f"Skipping {files_saved} duplicates, saving {self.deduplicator.format_bytes(bytes_saved)}")
+                self._update_status(f"Duplicate scan complete. Skipping {files_saved} duplicates, saving {self.deduplicator.format_bytes(bytes_saved)}")
+            else:
+                self._update_status("Duplicate scan complete. No duplicates found.")
             
             # Transfer non-duplicate files
             if files_to_transfer:
+                # Set the file count for transfer progress tracking
+                self.transfer_progress['files_to_transfer'] = len(files_to_transfer)
+                self._update_status("Starting transfer...")
                 success = self.pull_folder(remote_path, local_path)
                 if success:
                     stats['transferred'] = len(files_to_transfer)
@@ -862,6 +956,9 @@ class ADBManager:
                 self._update_status(f"Local path does not exist: {local_path}")
                 return False, stats
                 
+            # Start duplicate scanning
+            self._update_status("Scanning for duplicates...")
+            
             # Get list of local files
             local_files = []
             for root, dirs, files in os.walk(local_path):
@@ -897,10 +994,15 @@ class ADBManager:
                     duplicate_files, is_remote=False
                 )
                 stats['bytes_saved'] = bytes_saved
-                self._update_status(f"Skipping {files_saved} duplicates, saving {self.deduplicator.format_bytes(bytes_saved)}")
+                self._update_status(f"Duplicate scan complete. Skipping {files_saved} duplicates, saving {self.deduplicator.format_bytes(bytes_saved)}")
+            else:
+                self._update_status("Duplicate scan complete. No duplicates found.")
             
             # Transfer non-duplicate files
             if files_to_transfer:
+                # Set the file count for transfer progress tracking
+                self.transfer_progress['files_to_transfer'] = len(files_to_transfer)
+                self._update_status("Starting transfer...")
                 success = self.push_folder(local_path, remote_path)
                 if success:
                     stats['transferred'] = len(files_to_transfer)

@@ -237,6 +237,13 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.transfer_animation_job = None
         self.transfer_dots = 0
         
+        # File transfer progress tracking
+        self.transfer_file_progress = {
+            'current': 0,
+            'total': 0,
+            'active': False
+        }
+        
         # Set up ADB callbacks to our own methods
         self.adb_manager.set_progress_callback(self._update_progress)
         self.adb_manager.set_status_callback(self._update_status)
@@ -253,11 +260,50 @@ class AndroidFileHandlerGUI(tk.Tk):
 
     def _update_status(self, message: str):
         """Update status label (thread-safe)."""
-        # Don't update status if transfer animation is running
-        if self.transfer_animation_job is not None:
-            return  # Ignore ADB status updates during transfer animation
-        
         def update_ui():
+            # Check for transfer progress updates
+            if message.startswith("TRANSFER_PROGRESS:"):
+                parts = message.split(":")
+                if len(parts) == 3:
+                    current = int(parts[1])
+                    total = int(parts[2])
+                    self.transfer_file_progress['current'] = current
+                    self.transfer_file_progress['total'] = total
+                    self.transfer_file_progress['active'] = True
+                    # Don't update the UI here - let the animation handle it
+                    return
+            
+            # Check if we should start or switch animations based on message content
+            if self.transfer_animation_job is not None:
+                # Animation is already running
+                if "Scanning for duplicates" in message and not hasattr(self, '_scanning_active'):
+                    # Already scanning, ignore duplicate "Scanning for duplicates..." messages
+                    return
+                elif "Starting transfer" in message or "Transferring" in message:
+                    # Switch from scanning to transfer animation
+                    if hasattr(self, '_scanning_active'):
+                        delattr(self, '_scanning_active')
+                    self._stop_transfer_animation()
+                    self._start_transfer_animation()
+                    return
+                elif ("Duplicate scan complete" in message or 
+                      "No duplicates found" in message or
+                      "All files already exist" in message):
+                    # Allow these messages to show briefly before transfer starts
+                    self._stop_transfer_animation()
+                    self.status_label.config(text=message)
+                    self.update_idletasks()
+                    return
+                else:
+                    # Don't update status if transfer animation is running (except for specific cases)
+                    return
+            elif "Scanning for duplicates" in message:
+                # Start scanning animation
+                self._scanning_active = True
+                self._start_scanning_animation()
+                return
+            
+            # Normal status update
             self.status_label.config(text=message)
             self.update_idletasks()
         
@@ -313,11 +359,37 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.transfer_animation_job = True  # Mark as active before starting
         self._animate_transfer_text()
 
+    def _start_scanning_animation(self):
+        """Start the 'Scanning for duplicates...' animation."""
+        self.transfer_dots = 0
+        self.transfer_animation_job = True  # Mark as active before starting
+        self._animate_scanning_text()
+
+    def _animate_scanning_text(self):
+        """Animate the scanning text with dots."""
+        if self.transfer_animation_job is not None:
+            dots = "." * (self.transfer_dots + 1)
+            status_text = f"Scanning for duplicates{dots}"
+            self.status_label.config(text=status_text)
+            self.update_idletasks()  # Force immediate UI update
+            self.transfer_dots = (self.transfer_dots + 1) % 5  # Cycle 0-4 dots
+            # Schedule next update in 500ms
+            self.transfer_animation_job = self.after(500, self._animate_scanning_text)
+
     def _animate_transfer_text(self):
         """Animate the transfer text with dots."""
         if self.transfer_animation_job is not None:
             dots = "." * (self.transfer_dots + 1)
-            status_text = f"Transferring{dots}"
+            
+            # Show file progress if available
+            if (self.transfer_file_progress['active'] and 
+                self.transfer_file_progress['total'] > 0):
+                current = self.transfer_file_progress['current']
+                total = self.transfer_file_progress['total']
+                status_text = f"Transferring {current} of {total} files{dots}"
+            else:
+                status_text = f"Transferring{dots}"
+                
             self.status_label.config(text=status_text)
             self.update_idletasks()  # Force immediate UI update
             self.transfer_dots = (self.transfer_dots + 1) % 5  # Cycle 0-4 dots
@@ -330,6 +402,17 @@ class AndroidFileHandlerGUI(tk.Tk):
             if isinstance(self.transfer_animation_job, str):  # It's an after job ID
                 self.after_cancel(self.transfer_animation_job)
             self.transfer_animation_job = None
+        
+        # Clear scanning flag if it exists
+        if hasattr(self, '_scanning_active'):
+            delattr(self, '_scanning_active')
+            
+        # Reset file progress tracking
+        self.transfer_file_progress = {
+            'current': 0,
+            'total': 0,
+            'active': False
+        }
 
     def _initialize_app(self):
         """Initialize the application - check ADB and device."""
@@ -781,13 +864,19 @@ class AndroidFileHandlerGUI(tk.Tk):
         self.disable_controls()
         # Switch button to cancel mode during transfer
         self._switch_to_cancel_mode()
-        # Start the transfer animation
-        self._start_transfer_animation()
-
+        # Start with scanning animation for folder transfers
+        # File transfers will skip directly to transfer animation
+        
         # Determine if we're dealing with files or folders
         if direction == "pull":
             # For pull, check if remote path is a file
             is_file = self._is_remote_file(remote_path)
+            if not is_file:
+                # Start scanning animation for folder transfers
+                self._start_scanning_animation()
+            else:
+                # Start transfer animation for file transfers
+                self._start_transfer_animation()
             threading.Thread(
                 target=self._transfer_thread,
                 args=(direction, remote_path, local_path, transfer_id, is_file),
@@ -796,6 +885,12 @@ class AndroidFileHandlerGUI(tk.Tk):
         elif direction == "push":
             # For push, check if local path is a file
             is_file = os.path.isfile(local_path)
+            if not is_file:
+                # Start scanning animation for folder transfers
+                self._start_scanning_animation()
+            else:
+                # Start transfer animation for file transfers
+                self._start_transfer_animation()
             threading.Thread(
                 target=self._transfer_thread,
                 args=(direction, local_path, remote_path, transfer_id, is_file),
