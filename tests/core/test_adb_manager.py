@@ -2,17 +2,12 @@
 
 import pytest
 import unittest.mock as mock
-import os
-import tempfile
-import subprocess
 import sys
 from unittest.mock import MagicMock, patch, mock_open
 
 from src.core.adb_manager import (
     ADBManager,
     get_executable_directory,
-    get_platform_tools_directory,
-    get_adb_binary_path,
     is_adb_available,
     get_platform_type,
     ensure_platform_tools_in_user_dir

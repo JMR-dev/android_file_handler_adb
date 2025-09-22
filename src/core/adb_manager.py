@@ -8,15 +8,12 @@ import sys
 import subprocess
 import requests
 import zipfile
-import io
 import shutil
-import glob
 import time
 import re
 from typing import Optional, Tuple, Callable
 import tempfile
 from typing import Optional
-import hashlib
 
 try:
     from utils.file_deduplication import FileDeduplicator
