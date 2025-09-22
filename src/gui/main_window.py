@@ -226,8 +226,8 @@ class AndroidFileHandlerGUI(tk.Tk):
         def on_path_selected(path):
             self.android_path_selector.set_path(path)
             self._validate_paths_and_update_button()
-            
         browser = AndroidFileBrowser(self, self.adb_manager, on_path_selected)
+        browser.show_browser(direction="pull")
         
     def browse_local_folder(self):
         """Browse for local file or folder selection."""

@@ -98,11 +98,6 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
         resp.raise_for_status()
 
         zip_path = os.path.join(tmp_dir, "platform-tools.zip")
-        # Ensure temp directory exists (legacy tests may mock mkdtemp to non-existent path)
-        try:
-            os.makedirs(tmp_dir, exist_ok=True)
-        except Exception:
-            pass
         with open(zip_path, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=8192):
                 if chunk:

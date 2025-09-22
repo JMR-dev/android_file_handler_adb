@@ -15,9 +15,7 @@ class AndroidFileBrowser:
         self.parent = parent_window
         self.adb_manager = adb_manager
         self.path_callback = path_callback
-        
-        # Show the browser immediately
-        self.show_browser()
+
 
     def show_browser(self, direction="pull"):
         """Show a browsable Android folder tree. 

@@ -479,15 +479,9 @@ class ADBManager:
         if self.current_process is not None:
             try:
                 # If already finished, don't terminate
-                try:
-                    poll_result = None
-                    if hasattr(self.current_process, 'poll'):
-                        poll_result = self.current_process.poll()
-                    if poll_result is not None:
-                        self.current_process = None
-                        return False
-                except Exception:
-                    pass
+                if self.current_process.poll() is not None:
+                    self.current_process = None
+                    return False
                 self.current_process.terminate()
                 try:
                     self.current_process.wait(timeout=2)
