@@ -48,7 +48,8 @@ class TestADBFileTransfer:
         result = transfer.pull_file("/sdcard/test.txt", "/local/test.txt")
         
         assert result is True
-        mock_runner.run_adb_command.assert_called_with(['pull', '/sdcard/test.txt', '/local/test.txt'])
+        expected_local_path = os.path.normpath('/local/test.txt')
+        mock_runner.run_adb_command.assert_called_with(['pull', '/sdcard/test.txt', expected_local_path])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
     @patch('os.path.exists')
@@ -93,7 +94,8 @@ class TestADBFileTransfer:
         result = transfer.push_file("/local/test.txt", "/sdcard/test.txt")
         
         assert result is True
-        mock_runner.run_adb_command.assert_called_with(['push', '/local/test.txt', '/sdcard/test.txt'])
+        expected_local_path = os.path.normpath('/local/test.txt')
+        mock_runner.run_adb_command.assert_called_with(['push', expected_local_path, '/sdcard/test.txt'])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
     @patch('os.path.exists')
@@ -140,7 +142,8 @@ class TestADBFileTransfer:
         result = transfer.pull_folder("/sdcard/Documents", "/local/Documents")
         
         assert result is True
-        mock_runner.run_adb_command.assert_called_with(['pull', '/sdcard/Documents', '/local/Documents'])
+        expected_local_path = os.path.normpath('/local/Documents')
+        mock_runner.run_adb_command.assert_called_with(['pull', '/sdcard/Documents', expected_local_path])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
     @patch('os.path.exists')
@@ -171,7 +174,8 @@ class TestADBFileTransfer:
         result = transfer.push_folder("/local/Documents", "/sdcard/Documents")
         
         assert result is True
-        mock_runner.run_adb_command.assert_called_with(['push', '/local/Documents', '/sdcard/Documents'])
+        expected_local_path = os.path.normpath('/local/Documents')
+        mock_runner.run_adb_command.assert_called_with(['push', expected_local_path, '/sdcard/Documents'])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
     @patch('os.path.exists')

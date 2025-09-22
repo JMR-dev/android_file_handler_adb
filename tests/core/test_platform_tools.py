@@ -62,21 +62,22 @@ class TestPlatformTools(unittest.TestCase):
             with patch('os.path.islink', return_value=False):
                 with patch('os.path.isdir', return_value=False):
                     with patch('tempfile.mkdtemp', return_value='/tmp/test'):
-                        with patch('requests.get') as mock_get:
-                            with patch('builtins.open', mock_open()):
-                                with patch('zipfile.ZipFile') as mock_zip:
-                                    with patch('os.path.isdir', side_effect=lambda p: p == '/tmp/test/platform-tools'):
-                                        with patch('shutil.move'):
-                                            with patch('os.chmod'):
-                                                with patch('os.symlink'):
-                                                    with patch('shutil.rmtree'):
-                                                        mock_response = Mock()
-                                                        mock_response.iter_content.return_value = [b'content']
-                                                        mock_response.raise_for_status.return_value = None
-                                                        mock_get.return_value = mock_response
-                                                        
-                                                        result = ensure_platform_tools_in_user_dir()
-                                                        assert result is not None
+                        with patch('os.listdir', return_value=['platform-tools']):  # Mock directory listing
+                            with patch('requests.get') as mock_get:
+                                with patch('builtins.open', mock_open()):
+                                    with patch('zipfile.ZipFile') as mock_zip:
+                                        with patch('os.path.isdir', side_effect=lambda p: p == '/tmp/test/platform-tools'):
+                                            with patch('shutil.move'):
+                                                with patch('os.chmod'):
+                                                    with patch('os.symlink'):
+                                                        with patch('shutil.rmtree'):
+                                                            mock_response = Mock()
+                                                            mock_response.iter_content.return_value = [b'content']
+                                                            mock_response.raise_for_status.return_value = None
+                                                            mock_get.return_value = mock_response
+                                                            
+                                                            result = ensure_platform_tools_in_user_dir()
+                                                            assert result is not None
 
     def test_download_and_extract_adb_linux(self):
         """Test ADB download and extraction on Linux."""

@@ -58,21 +58,24 @@ class TestPlatformUtils:
         with patch.object(sys, 'frozen', True, create=True):
             with patch('src.core.platform_utils.get_executable_directory', return_value='/app/dir'):
                 result = get_platform_tools_directory()
-                assert result == '/app/dir/platform-tools'
+                expected = os.path.join('/app/dir', 'platform-tools')
+                assert result == expected
     
     def test_get_platform_tools_directory_src(self):
         """Test platform-tools directory when running from src."""
         with patch.object(sys, 'frozen', False, create=True):
             with patch('src.core.platform_utils.get_executable_directory', return_value='/project/src'):
                 result = get_platform_tools_directory()
-                assert result == '/project/src/platform-tools'
+                expected = os.path.join('/project/src', 'platform-tools')
+                assert result == expected
     
     def test_get_platform_tools_directory_gui_subdirectory(self):
         """Test platform-tools directory when running from src/gui."""
         with patch.object(sys, 'frozen', False, create=True):
             with patch('src.core.platform_utils.get_executable_directory', return_value='/project/src/gui'):
                 result = get_platform_tools_directory()
-                assert result == '/project/src/platform-tools'
+                expected = os.path.join('/project/src', 'platform-tools')
+                assert result == expected
     
     def test_get_platform_tools_directory_project_root(self):
         """Test platform-tools directory when running from project root."""
@@ -80,7 +83,8 @@ class TestPlatformUtils:
             with patch('src.core.platform_utils.get_executable_directory', return_value='/project'):
                 with patch('os.path.exists', return_value=True):
                     result = get_platform_tools_directory()
-                    assert result == '/project/src/platform-tools'
+                    expected = os.path.join('/project', 'src', 'platform-tools')
+                    assert result == expected
     
     def test_get_platform_tools_directory_fallback(self):
         """Test platform-tools directory fallback behavior."""
@@ -88,4 +92,5 @@ class TestPlatformUtils:
             with patch('src.core.platform_utils.get_executable_directory', return_value='/somewhere'):
                 with patch('os.path.exists', return_value=False):
                     result = get_platform_tools_directory()
-                    assert result == '/somewhere/src/platform-tools'
+                    expected = os.path.join('/somewhere', 'src', 'platform-tools')
+                    assert result == expected
