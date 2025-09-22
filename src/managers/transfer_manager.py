@@ -173,19 +173,6 @@ class TransferManager:
             # Handle errors on main thread
             if transfer_id == self.current_transfer_id and 'show_error' in self.ui_callbacks:
                 self.parent.after(0, lambda: self.ui_callbacks["show_error"](f"Transfer error: {str(e)}"))
-        
-        # Start transfer in background thread
-        self.current_transfer_id += 1
-        transfer_id = self.current_transfer_id
-        
-        threading.Thread(
-            target=self._transfer_thread,
-            args=(direction, source_path, dest_path, transfer_id, is_file),
-            daemon=True
-        ).start()
-        
-        return True
-    
     def cancel_transfer(self) -> bool:
         """Cancel the current transfer operation.
         
