@@ -1,629 +1,454 @@
-name: Build and Publish Multi-Platform
+# Multi-platform build + packaging workflow
+# - Builds a pyinstaller executable on Windows, Debian, Arch, Rocky.
+# - Packages using fpm into .deb, .rpm, and pacman (.pkg.tar.zst) files with explicit filenames.
+# - Creates a GitHub Release with the produced artifacts.
+#
+# Notes:
+# - Poetry is installed via snok/install-poetry@v1 in all jobs.
+# - fpm gem is pinned to 1.16.0 in the examples; change as needed.
+# - Rocky job uses tarball downloads for pyenv and python-build (non-interactive, CI-friendly).
+name: Build Multi-Platform Binaries
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Beta release (0.1.0)'
+      jobs:
+        description: "Comma-separated jobs to run (e.g., build-windows,build-debian,build-arch,build-rhel)"
         required: true
-        type: string
-      dry_run:
-        description: 'Dry run mode (skip AUR publishing)'
+        default: "build-windows,build-debian,build-arch,build-rhel"
+      DO_RELEASE:
+        description: "Set to 'true' to create a GitHub release after successful builds"
         required: false
-        default: false
-        type: boolean
+        default: "false"
+      UPLOAD_S3:
+        description: "Set to 'true' to upload build artifacts to S3 after builds"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
 
 env:
-  APP_NAME: android-file-handler
-  PYTHON_VERSION: "3.12"
+  # change this if you prefer a different pinned fpm version
+  FPM_VERSION: "1.16.0"
+  # Personal Access Token for HTTPS git operations (populate in repository secrets)
+  CI_CD_PAT: ${{ secrets.CI_CD_PAT }}
+  CI_CD: true
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-deb
-            binary_name: android-file-handler
-          - os: windows-latest  
-            platform: windows
-            binary_name: android-file-handler.exe
-          - os: ubuntu-20.04
-            platform: linux-rpm
-            binary_name: android-file-handler
-          - os: ubuntu-latest
-            platform: linux-arch
-            binary_name: android-file-handler
-            container: archlinux:latest
-
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
-    
+  build-windows:
+    if: contains(github.event.inputs.jobs, 'build-windows')
+    runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Detect and Configure Environment
-      shell: bash
-      run: |
-        # Environment detection function
-        detect_environment() {
-          if [ "${ACT:-false}" = "true" ]; then
-            echo "ACT_ENVIRONMENT=local" >> $GITHUB_ENV
-            echo "PYTHON_CMD=python3" >> $GITHUB_ENV
-            echo "PIP_CMD=pip3" >> $GITHUB_ENV
-            echo "🔧 Local testing environment detected (Act)"
-          else
-            echo "ACT_ENVIRONMENT=github" >> $GITHUB_ENV
-            echo "PYTHON_CMD=python" >> $GITHUB_ENV
-            echo "PIP_CMD=pip" >> $GITHUB_ENV
-            echo "🚀 GitHub Actions environment detected"
-          fi
-        }
-        
-        # Setup system Python for Act
-        setup_system_python() {
-          echo "Setting up system Python for local testing..."
-          
-          # Update package manager and install Python
-          if command -v apt-get &> /dev/null; then
-            apt-get update -qq
-            apt-get install -y python3 python3-pip python3-venv curl
-          elif command -v pacman &> /dev/null; then
-            pacman -Sy --noconfirm python python-pip curl
-          elif command -v dnf &> /dev/null; then
-            dnf install -y python3 python3-pip curl
-          fi
-          
-          # Create symbolic links for compatibility
-          ln -sf $(which python3) /usr/local/bin/python || echo "Python already linked"
-          ln -sf $(which pip3) /usr/local/bin/pip || echo "Pip already linked"
-          
-          # Verify installation
-          python3 --version
-          pip3 --version
-        }
-        
-        # Main execution
-        detect_environment
-        
-        if [ "${ACT_ENVIRONMENT}" = "local" ]; then
-          setup_system_python
-        fi
-    
-    - name: Setup Arch Linux environment
-      if: matrix.platform == 'linux-arch'
-      run: |
-        pacman -Sy --noconfirm
-        pacman -S --noconfirm python python-pip base-devel git curl
-        
-        # For Act compatibility, ensure Python is available as 'python'
-        if [ "${ACT:-false}" = "true" ]; then
-          ln -sf $(which python3) /usr/local/bin/python || echo "Python already linked"
-          ln -sf $(which pip3) /usr/local/bin/pip || echo "Pip already linked"
-        fi
-    
-    - name: Set up Python ${{ env.PYTHON_VERSION }} (GitHub Actions Only)
-      if: matrix.platform != 'linux-arch' && env.ACT != 'true'
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    
-    - name: Install Poetry
-      shell: bash
-      run: |
-        echo "Installing Poetry for ${ACT_ENVIRONMENT:-github} environment..."
-        
-        if [ "${{ matrix.platform }}" == "linux-arch" ]; then
-          # Arch Linux has Poetry in packages
-          if command -v pacman &> /dev/null; then
-            pacman -S --noconfirm python-poetry
-          else
-            pip install poetry
-          fi
-          # Configure poetry for system-wide installation in containers
-          poetry config virtualenvs.create false
-          poetry config virtualenvs.in-project false
-        else
-          # Install Poetry via official installer for other platforms
-          if [ "${ACT_ENVIRONMENT}" = "local" ]; then
-            # For Act, install Poetry with system Python
-            curl -sSL https://install.python-poetry.org | python3 -
-            echo "$HOME/.local/bin" >> $GITHUB_PATH
-            export PATH="$HOME/.local/bin:$PATH"
-            # Configure Poetry for Act compatibility
-            poetry config virtualenvs.create false
-            echo "🔧 Configured Poetry for system-wide installation (Act)"
-          else
-            # For GitHub Actions, use the action
-            curl -sSL https://install.python-poetry.org | python -
-            echo "$HOME/.local/bin" >> $GITHUB_PATH
-          fi
-        fi
-        
-        # Verify Poetry installation
-        export PATH="$HOME/.local/bin:$PATH"
-        poetry --version
-    
-    - name: Lock and install dependencies
-      shell: bash
-      run: |
-        echo "Installing dependencies in ${ACT_ENVIRONMENT:-github} environment..."
-        
-        # Ensure Poetry is in PATH
-        export PATH="$HOME/.local/bin:$PATH"
-        
-        # Configure Poetry based on environment
-        if [ "${ACT_ENVIRONMENT}" = "local" ] || [ "${{ matrix.platform }}" = "linux-arch" ]; then
-          # For Act and Arch containers, use system-wide installation
-          poetry config virtualenvs.create false
-          poetry config virtualenvs.in-project false
-          echo "🔧 Configured Poetry for system-wide installation"
-        else
-          # For GitHub Actions, use virtual environments
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Ensure Poetry is on PATH (Windows)
+        shell: pwsh
+        run: |
+          # Add Poetry user bin to PATH for subsequent steps in this job
+          $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
+          Write-Output $poetryPath >> $Env:GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          poetry install
+
+      - name: Build Windows executable
+        run: |
+          # Use the Windows spec file so packaging is consistent and reproducible
+          poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: |
+            dist/**/android-file-handler*.exe
+            dist/android-file-handler.exe
+       
+  build-debian:
+    if: contains(github.event.inputs.jobs, 'build-debian')
+    env:
+      DISTRO_TYPE: debian
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+    steps:
+      - name: Install system dependencies & gem fpm (include Tcl/Tk)
+        run: |
+          set -euo pipefail
+          apt-get update
+          # Install Tcl/Tk runtimes, dev headers and common X libraries required by tkinter
+          apt-get install -y --no-install-recommends \
+            curl git build-essential ruby ruby-dev gcc make zlib1g-dev ca-certificates python3-tk \
+            tcl8.6 tk8.6 tcl8.6-dev tk8.6-dev libx11-6 libxext6 libxrender1 libxcb1
+          # install pinned fpm to the system gem dir (will be available under gem env's EXECUTABLE DIRECTORY or /usr/local/bin)
+          gem install --no-document -v "${FPM_VERSION}" fpm
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Configure Poetry
+        run: |
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
+          export PATH="$HOME/.local/bin:$PATH"
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-          echo "🚀 Configured Poetry for virtual environment"
-        fi
-        
-        poetry lock
-        poetry install
-    
-    - name: Build binary with PyInstaller
-      shell: bash
-      run: |
-        echo "Building binary in ${ACT_ENVIRONMENT:-github} environment..."
-        
-        # Ensure Poetry is in PATH
-        export PATH="$HOME/.local/bin:$PATH"
-        
-        # Install PyInstaller
-        poetry run pip install pyinstaller
-        
-        # Build based on platform
-        if [ "${{ matrix.platform }}" == "windows" ]; then
-          echo "Building Windows binary..."
-          poetry run pyinstaller --onefile \
-            --name "${{ matrix.binary_name }}" \
-            --icon=icon_media/robot_files_256.ico \
-            src/main.py
-        else
-          echo "Building Linux binary..."
-          poetry run pyinstaller --onefile \
-            --name "${{ matrix.binary_name }}" \
-            --icon=icon_media/robot_files_256.png \
-            src/main.py
-        fi
-        
-        echo "✅ Binary built successfully for ${{ matrix.platform }}"
-        
-        # Verify binary was created
-        if [ -f "dist/${{ matrix.binary_name }}" ]; then
-          echo "✅ Binary verified: dist/${{ matrix.binary_name }}"
-          ls -la "dist/${{ matrix.binary_name }}"
-        else
-          echo "❌ Binary not found: dist/${{ matrix.binary_name }}"
-          echo "Available files in dist/:"
-          ls -la dist/ || echo "No dist/ directory found"
-          exit 1
-        fi
-    
-    - name: Install fpm (Ubuntu/Debian)
-      if: matrix.platform == 'linux-deb' || matrix.platform == 'linux-rpm'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm
-        sudo gem install --no-document fpm
 
-    - name: Install package tools (Arch)
-      if: matrix.platform == 'linux-arch'
-      run: |
-        pacman -S --noconfirm base-devel
-    
-    - name: Create .deb package
-      if: matrix.platform == 'linux-deb'
-      run: |
-        mkdir -p package/usr/bin
-        cp "dist/${{ matrix.binary_name }}" "package/usr/bin/${{ env.APP_NAME }}"
-        fpm -s dir -t deb -n ${{ env.APP_NAME }} -v ${{ github.event.inputs.version }} \
-            --description "Android file transfer utility via ADB" \
-            --depends "python3.12" \
-            --maintainer "Jason Ross <jason.ross841@gmail.com>" \
-            --url "https://github.com/${{ github.repository }}" \
-            -C package \
-            usr/bin/
+      - name: Install dependencies & build executable
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          poetry env use python3.12 || true
+          # Debug: show tkinter/_tkinter and Tcl library discovery in the Poetry venv
+          poetry run python -c 'import tkinter, _tkinter, sys; print("tkinter=", getattr(tkinter, "__file__", None)); print("_tkinter=", getattr(_tkinter, "__file__", None)); import tkinter as tk; print("TCL_LIBRARY=", tk.Tcl().eval("info library"))'
 
-    - name: Create .rpm package  
-      if: matrix.platform == 'linux-rpm'
-      run: |
-        mkdir -p package/usr/bin
-        cp "dist/${{ matrix.binary_name }}" "package/usr/bin/${{ env.APP_NAME }}"
-        fpm -s dir -t rpm -n ${{ env.APP_NAME }} -v ${{ github.event.inputs.version }} \
-            --description "Android file transfer utility via ADB" \
-            --depends "python3.12" \
-            --maintainer "Jason Ross <jason.ross841@gmail.com>" \
-            --url "https://github.com/${{ github.repository }}" \
-            -C package \
-            usr/bin/
+          # Build distro-specific package layout using the build script via Poetry
+          poetry run python scripts/build_package_linux.py
 
-    - name: Calculate SHA256 for Arch PKGBUILD
-      if: matrix.platform == 'linux-arch'
-      run: |
-        # Calculate checksum of the Linux binary for PKGBUILD with enhanced error context
-        binary_file="dist/${{ matrix.binary_name }}"
-        
-        echo "=== SHA256 Calculation for Arch Package ==="
-        echo "Target binary: $binary_file"
-        
-        if [ ! -f "$binary_file" ]; then
-          echo "❌ Critical Error: Binary file not found"
-          echo "   Expected location: $binary_file"
-          echo "   Working directory: $(pwd)"
-          echo "   Available files in dist/:"
-          if [ -d "dist/" ]; then
-            ls -la dist/
+      - name: Package .deb (fpm)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          VERSION="$(poetry version -s)"
+          PKG_DIR="pkg_dist_debian"
+          mkdir -p dist
+          # Debug listing
+          echo "Packaging from $PKG_DIR"
+          ls -la "$PKG_DIR" || true
+
+          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+          PKG_ITEMS=( "usr/local/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+          if [ -f "$ICON_PATH" ]; then
+            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
           else
-            echo "   No dist/ directory found"
+            echo "Note: icon not present, packaging without icon"
           fi
-          echo "   This indicates a PyInstaller build failure"
-          exit 1
-        fi
-        
-        # Validate file size before calculating checksum
-        file_size=$(stat -c%s "$binary_file")
-        minimum_expected_size=100000  # 100KB minimum
-        
-        if [ "$file_size" -lt "$minimum_expected_size" ]; then
-          echo "❌ Critical Error: Binary file suspiciously small"
-          echo "   File size: $file_size bytes"
-          echo "   Expected minimum: $minimum_expected_size bytes"
-          echo "   This indicates a build failure or corruption"
-          exit 1
-        fi
-        
-        # Calculate SHA256 checksum
-        sha256_sum=$(sha256sum "$binary_file" | cut -d' ' -f1)
-        
-        if [ -z "$sha256_sum" ]; then
-          echo "❌ Critical Error: Failed to calculate SHA256 checksum"
-          echo "   This indicates file corruption or system issues"
-          exit 1
-        fi
-        
-        echo "✅ SHA256 calculated successfully: $sha256_sum"
-        echo "   File: $binary_file"
-        echo "   Size: $file_size bytes"
-        echo "SHA256SUM=$sha256_sum" >> $GITHUB_ENV
 
-    - name: Create Arch PKGBUILD
-      if: matrix.platform == 'linux-arch'
-      run: |
-        # Create PKGBUILD file for AUR submission with improved formatting
-        {
-          echo '# Maintainer: Jason Ross <jason.ross841@gmail.com>'
-          echo 'pkgname=${{ env.APP_NAME }}'
-          echo 'pkgver=${{ github.event.inputs.version }}'
-          echo 'pkgrel=1'
-          echo 'pkgdesc="Android file transfer utility via ADB"'
-          echo "arch=('x86_64')"
-          echo 'url="https://github.com/${{ github.repository }}"'
-          echo "license=('MIT')"
-          echo "depends=('python')"
-          echo 'source=("${pkgname}-${pkgver}::https://github.com/${{ github.repository }}/releases/download/v${pkgver}/${{ env.APP_NAME }}-${pkgver}-linux")'
-          echo 'sha256sums=(${{ env.SHA256SUM }})'
-          echo ''
-          echo 'package() {'
-          echo '    install -Dm755 "${srcdir}/${pkgname}-${pkgver}" "${pkgdir}/usr/bin/${pkgname}"'
-          echo '}'
-        } > PKGBUILD
-        
-        # Generate .SRCINFO file with improved formatting
-        {
-          echo 'pkgbase = ${{ env.APP_NAME }}'
-          echo $'\tpkgdesc = Android file transfer utility via ADB'
-          echo $'\tpkgver = ${{ github.event.inputs.version }}'
-          echo $'\tpkgrel = 1'
-          echo $'\turl = https://github.com/${{ github.repository }}'
-          echo $'\tarch = x86_64'
-          echo $'\tlicense = MIT'
-          echo $'\tdepends = python'
-          echo $'\tsource = ${{ env.APP_NAME }}-${{ github.event.inputs.version }}::https://github.com/${{ github.repository }}/releases/download/v${{ github.event.inputs.version }}/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux'
-          echo $'\tsha256sums = ${{ env.SHA256SUM }}'
-          echo ''
-          echo 'pkgname = ${{ env.APP_NAME }}'
-        } > .SRCINFO
+          fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
+            --architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
+            --after-install scripts/debian_postinst.sh \
+            -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
-    - name: Verify generated files
-      if: matrix.platform == 'linux-arch'
-      run: |
-        echo "=== PKGBUILD Content ==="
-        cat PKGBUILD
-        echo "=== .SRCINFO Content ==="
-        cat .SRCINFO
-        echo "=== File validation ==="
-        if [ ! -f "PKGBUILD" ] || [ ! -f ".SRCINFO" ]; then
-          echo "Error: Required files not generated"
-          exit 1
-        fi
-        
-        # Validate PKGBUILD syntax
-        if ! grep -q "^pkgname=" PKGBUILD; then
-          echo "Error: Invalid PKGBUILD format"
-          exit 1
-        fi
-        
-        # Validate .SRCINFO syntax
-        if ! grep -q "^pkgbase = " .SRCINFO; then
-          echo "Error: Invalid .SRCINFO format"
-          exit 1
-        fi
-        
-        echo "✓ All files validated successfully"
+      - name: Upload Debian .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: |
+            dist/android-file-handler_*.deb
+            pkg_dist_debian/**
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.platform }}-artifacts
-        path: |
-          dist/${{ matrix.binary_name }}
-          *.deb
-          *.rpm
-          PKGBUILD
-          .SRCINFO
-
-  release:
-    needs: build
+  build-arch:
+    if: contains(github.event.inputs.jobs, 'build-arch')
+    env:
+      DISTRO_TYPE: arch
     runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts/
-    
-    - name: Prepare release assets
-      shell: bash
-      run: |
-        mkdir -p release-assets
-        
-        # Function: copy_and_validate
-        # Purpose: Safely copy files with comprehensive validation and error reporting
-        # Parameters:
-        #   $1 (source_file_path): Absolute path to the source file to be copied
-        #   $2 (destination_path): Absolute path where the file should be copied to
-        #   $3 (minimum_size_bytes): Minimum expected file size in bytes for validation
-        # Returns:
-        #   0: Success - file copied and validated successfully
-        #   1: Failure - file not found, too small, or copy operation failed
-        # Side Effects:
-        #   - Creates destination file if source is valid
-        #   - Outputs detailed status messages with file information
-        copy_and_validate() {
-          local source_file_path="$1"
-          local destination_path="$2"
-          local minimum_size_bytes="$3"
-          
-          echo "--- Validating: $(basename "$source_file_path") ---"
-          
-          if [ ! -f "$source_file_path" ]; then
-            echo "❌ File not found: $source_file_path"
-            echo "   Expected location: $source_file_path"
-            echo "   Parent directory contents:"
-            ls -la "$(dirname "$source_file_path")" 2>/dev/null || echo "   Directory does not exist"
-            return 1
-          fi
-          
-          local actual_file_size=$(stat -c%s "$source_file_path")
-          echo "   File size: $actual_file_size bytes"
-          
-          if [ "$actual_file_size" -lt "$minimum_size_bytes" ]; then
-            echo "❌ File too small: $source_file_path"
-            echo "   Actual size: $actual_file_size bytes"
-            echo "   Required minimum: $minimum_size_bytes bytes"
-            echo "   This indicates a build failure or incomplete binary"
-            return 1
-          fi
-          
-          # Attempt to copy file
-          if cp "$source_file_path" "$destination_path"; then
-            echo "✅ Successfully copied: $(basename "$destination_path")"
-            echo "   Size: $actual_file_size bytes"
-            echo "   Source: $source_file_path"
-            echo "   Destination: $destination_path"
-            return 0
+      - name: Install system dependencies (Arch) and system Ruby
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm ruby base-devel curl git tar ca-certificates tk tcl libx11 libxext libxrender libxcb
+          # Install fpm system-wide and pin version so fpm will be in /usr/in
+          gem install --no-document erb
+          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/bin
+          # persist system bindir to subsequent steps (usually already on PATH)
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Configure Poetry
+        run: |
+          echo 'export PATH="$HOME/bin:$PATH"' >> $GITHUB_ENV
+          export PATH="$HOME/bin:$PATH"
+
+      - name: Install dependencies & build executable
+        run: |
+          export PATH="$HOME/bin:/usr/bin:$PATH"
+          # Use unified build script to produce pkg_dist_arch layout via Poetry
+          poetry run python scripts/build_package_linux.py
+
+      - name: Package pacman (fpm)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:/usr/bin:$PATH"
+          VERSION="$(poetry version -s)"
+          PKG_DIR="pkg_dist_arch"
+          mkdir -p dist
+          echo "Packaging from $PKG_DIR"
+          ls -la "$PKG_DIR" || true
+
+          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+          if [ -f "$ICON_PATH" ]; then
+            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
           else
-            echo "❌ Failed to copy file"
-            echo "   Source: $source_file_path" 
-            echo "   Destination: $destination_path"
-            echo "   Check disk space and permissions"
-            return 1
+            echo "Note: icon not present, packaging without icon"
           fi
-        }
-        
-        echo "=== Release Asset Preparation ==="
-        echo "Working directory: $(pwd)"
-        echo "Available artifacts:"
-        find artifacts/ -type f -name "*" | head -20
-        
-        # Track validation results for comprehensive reporting
-        linux_binary_success=false
-        windows_binary_success=false
-        
-        # Validate and copy Linux binary (minimum 1MB for GUI application)
-        if copy_and_validate "artifacts/linux-deb-artifacts/dist/android-file-handler" "release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-linux" 1000000; then
-          linux_binary_success=true
-        fi
-        
-        # Validate and copy Windows binary (minimum 1MB for GUI application)
-        if copy_and_validate "artifacts/windows-artifacts/dist/android-file-handler.exe" "release-assets/${{ env.APP_NAME }}-${{ github.event.inputs.version }}-windows.exe" 1000000; then
-          windows_binary_success=true
-        fi
-        
-        # Copy and count package files
-        echo "=== Package Collection ==="
-        deb_count=$(find artifacts/ -name "*.deb" -exec cp {} release-assets/ \; -print | wc -l)
-        rpm_count=$(find artifacts/ -name "*.rpm" -exec cp {} release-assets/ \; -print | wc -l)
-        
-        echo "=== Build Quality Assessment ==="
-        echo "Linux binary: $([ "$linux_binary_success" = true ] && echo "✅ PASS" || echo "❌ FAIL")"
-        echo "Windows binary: $([ "$windows_binary_success" = true ] && echo "✅ PASS" || echo "❌ FAIL")"
-        echo "DEB packages: $deb_count $([ "$deb_count" -gt 0 ] && echo "✅" || echo "❌")"
-        echo "RPM packages: $rpm_count $([ "$rpm_count" -gt 0 ] && echo "✅" || echo "❌")"
-        
-        # Comprehensive release asset validation
-        echo "=== Release Asset Validation ==="
-        
-        # Check if any assets were created
-        if [ -z "$(ls -A release-assets/)" ]; then
-          echo "❌ Critical Error: No release assets were created"
-          echo "   This indicates a complete build system failure"
-          echo "   Check artifact download and binary generation steps"
-          exit 1
-        fi
-        
-        # Require at least one valid binary for release
-        if [ "$linux_binary_success" = false ] && [ "$windows_binary_success" = false ]; then
-          echo "❌ Critical Error: No valid binaries were created"
-          echo "   At least one platform binary is required for release"
-          echo "   Linux binary status: $([ "$linux_binary_success" = true ] && echo "SUCCESS" || echo "FAILED")"
-          echo "   Windows binary status: $([ "$windows_binary_success" = true ] && echo "SUCCESS" || echo "FAILED")"
-          exit 1
-        fi
-        
-        # Count total release assets
-        total_assets=$(ls -1 release-assets/ | wc -l)
-        echo "✅ Release validation passed"
-        echo "   Total assets: $total_assets"
-        echo "   Binaries: $([ "$linux_binary_success" = true ] && echo -n "Linux " || true)$([ "$windows_binary_success" = true ] && echo -n "Windows" || true)"
-        echo "   Packages: $deb_count DEB, $rpm_count RPM"
-        
-        # Generate comprehensive checksums
-        cd release-assets
-        sha256sum * > SHA256SUMS
-        echo "=== Final Release Assets ==="
-        ls -la
-        echo "=== SHA256 Checksums ==="
-        cat SHA256SUMS
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v${{ github.event.inputs.version }}
-        name: Release v${{ github.event.inputs.version }}
-        draft: false
-        prerelease: true
-        files: release-assets/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+            --architecture x86_64 --prefix /usr/bin \
+            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
-  publish-aur:
-    needs: release
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: |
+            dist/*.pkg.tar.*
+            pkg_dist_arch/**
+
+
+  build-rhel:
+    if: contains(github.event.inputs.jobs, 'build-rhel')
+    env:
+      DISTRO_TYPE: rhel
     runs-on: ubuntu-latest
-    if: github.event.inputs.dry_run != 'true'
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Download Arch artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: linux-arch-artifacts
-        path: aur-files/
-    
-    - name: Validate AUR files
-      run: |
-        echo "=== Validating AUR files ==="
-        if [ ! -f "aur-files/PKGBUILD" ]; then
-          echo "❌ Error: PKGBUILD not found"
-          exit 1
-        fi
-        
-        if [ ! -f "aur-files/.SRCINFO" ]; then
-          echo "❌ Error: .SRCINFO not found"
-          exit 1
-        fi
-        
-        echo "=== PKGBUILD Content ==="
-        cat aur-files/PKGBUILD
-        echo "=== .SRCINFO Content ==="
-        cat aur-files/.SRCINFO
-        
-        # Validate PKGBUILD has required fields
-        if ! grep -q "^pkgname=" aur-files/PKGBUILD; then
-          echo "❌ Error: PKGBUILD missing pkgname"
-          exit 1
-        fi
-        
-        if ! grep -q "^pkgver=" aur-files/PKGBUILD; then
-          echo "❌ Error: PKGBUILD missing pkgver"
-          exit 1
-        fi
-        
-        echo "✓ AUR files validated successfully"
-    
-    # AUR Publishing (Requires Repository Secrets)
-    # Required secrets for AUR publishing:
-    #   AUR_SSH_PRIVATE_KEY: SSH private key for AUR publishing
-    #   AUR_USER_NAME: Git user name for AUR commits  
-    #   AUR_USER_EMAIL: Git user email for AUR commits
-    - name: Publish to AUR
-      env:
-        AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-        AUR_USER_NAME: ${{ secrets.AUR_USER_NAME }}
-        AUR_USER_EMAIL: ${{ secrets.AUR_USER_EMAIL }}
-      run: |
-        # Setup SSH with proper security
-        mkdir -p ~/.ssh
-        chmod 700 ~/.ssh
-        echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-        chmod 600 ~/.ssh/aur
-        ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-        
-        # Configure git
-        git config --global user.name "$AUR_USER_NAME"
-        git config --global user.email "$AUR_USER_EMAIL"
-        
-        # Clone or create AUR repo
-        echo "📦 Connecting to AUR..."
-        ssh -i ~/.ssh/aur aur@aur.archlinux.org -o StrictHostKeyChecking=no "ls -la" || echo "AUR access confirmed"
-        git clone ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git aur-repo || mkdir aur-repo
-        cd aur-repo
-        
-        # Initialize if new repo
-        if [ ! -d ".git" ]; then
-          echo "📦 Initializing new AUR repository..."
-          git init
-          git remote add origin ssh://aur@aur.archlinux.org/${{ env.APP_NAME }}.git
-        fi
-        
-        # Copy and validate files
-        cp ../aur-files/PKGBUILD ./
-        cp ../aur-files/.SRCINFO ./
-        
-        echo "📦 Files prepared for AUR submission:"
-        ls -la PKGBUILD .SRCINFO
-        
-        # Commit and push with fallback for branch names
-        git add PKGBUILD .SRCINFO
-        if git commit -m "Update to version ${{ github.event.inputs.version }}"; then
-          echo "📦 Pushing to AUR..."
-          git push -u origin master 2>/dev/null || git push -u origin main
-          echo "✅ Successfully published to AUR!"
-        else
-          echo "ℹ️ No changes to commit (package may already be up to date)"
-        fi
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  dry-run-summary:
-    needs: release
+      - name: Update OS and install Docker
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Remove possible conflicting containerd packages that can block docker.io installation
+          sudo apt-get remove -y --purge containerd containerd.io || true
+          sudo apt-get autoremove -y || true
+          # Try installing docker.io from distro packages
+          if ! sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release docker.io git build-essential; then
+            echo "apt install docker.io failed; falling back to Docker convenience script"
+            # Fallback: use Docker's official convenience script
+            curl -fsSL https://get.docker.com | sudo sh
+          fi
+          sudo usermod -aG docker $USER || true
+
+      - name: Pull Fedora container image
+        run: |
+          docker pull fedora:latest
+
+      - name: Start Fedora container (background) and mount repo
+        run: |
+          # Run container with workspace mounted
+          docker run -d --name rhel-build -v "$PWD":/workspace -w /workspace fedora:latest sleep infinity
+
+      - name: Prepare container build environment (dnf, pyenv, python, poetry, fpm)
+        run: |
+          set -euo pipefail
+          # Update the Fedora image and install build deps
+          docker exec rhel-build bash -lc "dnf -y update && dnf -y install gcc make zlib-devel bzip2 bzip2-devel readline-devel sqlite-devel openssl-devel libffi-devel wget tar git curl ruby rubygems rpm-build redhat-rpm-config gcc-c++ patch which xz-devel" 
+
+          # Install pyenv into the container (if not present)
+          docker exec rhel-build bash -lc "[ -d \"/root/.pyenv\" ] || git clone https://github.com/pyenv/pyenv.git /root/.pyenv && mkdir -p /root/.pyenv/plugins && [ -d \"/root/.pyenv/plugins/python-build\" ] || git clone https://github.com/pyenv/pyenv-build.git /root/.pyenv/plugins/python-build"
+
+          # Install Python 3.12 via pyenv and set global using explicit pyenv binary path
+          # Use single quotes so $PYENV_ROOT and $PATH are expanded inside the container's shell
+          docker exec rhel-build bash -lc 'export PYENV_ROOT="/root/.pyenv"; export PATH="$PYENV_ROOT/bin:$PATH"; /root/.pyenv/bin/pyenv install -s 3.12.0; /root/.pyenv/bin/pyenv global 3.12.0; /root/.pyenv/bin/pyenv rehash'
+
+          # Install Poetry inside the container using the official installer (install to /root/.local/bin)
+          # Use single quotes so PATH is evaluated inside the container shell rather than the runner
+          docker exec rhel-build bash -lc 'export PATH="/root/.pyenv/shims:/root/.pyenv/bin:$PATH"; curl -sSL https://install.python-poetry.org | python3 - --yes'
+
+          # Verify Poetry is available via explicit path if not on PATH
+          docker exec rhel-build bash -lc "/root/.local/bin/poetry --version || echo 'Poetry not found in /root/.local/bin'"
+
+          # Install fpm (Ruby gem) and ensure rpm build tools exist
+          docker exec rhel-build bash -lc "dnf -y install ruby rubygems make && gem install --no-document -v \"${FPM_VERSION}\" fpm"
+
+      - name: Build inside container using Poetry
+        run: |
+          set -euo pipefail
+          # Use poetry inside the container to build package layouts. Use explicit paths so the runner shell
+          # doesn't expand $HOME; expansion should occur inside the container.
+          docker exec rhel-build bash -lc 'export PATH="/root/.local/bin:/root/.pyenv/shims:/root/.pyenv/bin:$PATH"; export CI_CD=true; export DISTRO_TYPE=rhel; cd /workspace && /root/.local/bin/poetry install --no-interaction && /root/.local/bin/poetry run python scripts/build_package_linux.py'
+
+      - name: Package RHEL (fpm) inside container
+        shell: bash
+        run: |
+          # Run the entire packaging flow inside the Fedora container so Poetry, PATH and arrays are evaluated in-container.
+          docker exec rhel-build bash -lc '
+            set -euo pipefail
+            VERSION="$(/root/.local/bin/poetry version -s)"
+            PKG_DIR="pkg_dist_rhel"
+            mkdir -p dist || true
+            echo "Packaging from $PKG_DIR (version=$VERSION)"
+            ls -la "$PKG_DIR" || true
+
+            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+            PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
+            if [ -f "$ICON_PATH" ]; then
+              PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
+            else
+              echo "Note: icon not present, packaging without icon"
+            fi
+
+            # Run fpm inside the container to produce an RPM
+            cd /workspace
+            exec fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p "dist/android-file-handler-${VERSION}.x86_64.rpm" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+          '
+
+      - name: Upload RHEL artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhel-package
+          path: |
+            dist/*.rpm
+            pkg_dist_rhel/**
+
+
+    
+  create-release:
+    needs: [build-windows, build-debian, build-arch, build-rhel]
+    if: ${{ github.event.inputs.DO_RELEASE == 'true' && needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
     runs-on: ubuntu-latest
-    if: github.event.inputs.dry_run == 'true'
     steps:
-    - name: Dry Run Summary
-      run: |
-        echo "🔍 DRY RUN MODE - No packages were published"
-        echo "==============================================="
-        echo "✅ Binaries built successfully"
-        echo "✅ Packages created successfully"  
-        echo "✅ GitHub release created"
-        echo "⏭️ AUR publishing skipped (dry run mode)"
-        echo ""
-        echo "To publish to AUR, re-run with dry_run=false"
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        
+      - name: Get version
+        id: version
+        run: echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./binaries
+
+      - name: List downloaded binaries (debug)
+        run: |
+          echo "Downloaded files:"
+          ls -la ./binaries || true        
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          files: |
+            ./binaries/android-file-handler.exe
+            ./binaries/android-file-handler_*.deb
+            ./binaries/android-file-handler-*.rpm
+            ./binaries/android-file-handler-*-x86_64.pkg.tar.*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-s3:
+    needs: [build-windows, build-debian, build-arch, build-rhel]
+    if: ${{ github.event.inputs.UPLOAD_S3 == 'true' || contains(github.event.inputs.jobs, 'upload-s3') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install AWS CLI
+        run: |
+          python -m pip install --upgrade pip awscli
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./binaries
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload artifacts to S3
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.S3_BUCKET }}" ]; then
+            echo "S3_BUCKET secret not set; skipping upload"
+            exit 0
+          fi
+          aws s3 sync ./binaries s3://${{ secrets.S3_BUCKET }}/builds/${{ github.run_id }}/ --acl private
+        env:
+          AWS_PAGER: ""
+  
+  sync-wiki:
+    needs: create-release
+    if: always() && needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout wiki repo
+        run: |
+          git clone "https://github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+
+      - name: Sync WIKI.md to Wiki/Home.md
+        run: |
+          set -e
+          SRC_FILE="WIKI.md"
+          DEST_FILE="wiki/Home.md"
+
+          if [ ! -f "$SRC_FILE" ]; then
+            echo "No $SRC_FILE in main repo; skipping."
+            exit 0
+          fi
+
+          if ! cmp -s "$SRC_FILE" "$DEST_FILE"; then
+            echo "Changes found, updating wiki..."
+            cp "$SRC_FILE" "$DEST_FILE"
+            cd wiki
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Home.md
+            git commit -m "Sync WIKI.md from main repo [skip ci]" || echo "No changes to commit"
+            git push
+          else
+            echo "No changes in $SRC_FILE; wiki is up to date."
+          fi
