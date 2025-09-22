@@ -9,6 +9,7 @@ bin/
 test-act.yml
 pkg_dist_debian
 pkg*
+.pytest*
 
 # Python cache files
 __pycache__/
