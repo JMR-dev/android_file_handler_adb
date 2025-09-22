@@ -44,7 +44,7 @@ A simple Windows GUI tool to pull folders from an Android device using ADB (Andr
 2. Run the application:
 
    ```sh
-   poetry run python3 src/main.py
+   poetry run python -m src.main 
    ```
 
 3. Follow the on-screen instructions:

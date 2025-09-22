@@ -9,12 +9,12 @@ from typing import Optional, Callable, Tuple, Dict, Any
 
 try:
     from .device_manager import DeviceManager
-    from .animation_handler import AnimationHandler
-    from .dialog_manager import DialogManager
+    from ..gui.handlers.animation_handler import AnimationHandler
+    from ..gui.dialogs.dialog_manager import DialogManager
 except ImportError:
     from device_manager import DeviceManager
-    from animation_handler import AnimationHandler
-    from dialog_manager import DialogManager
+    from gui.handlers.animation_handler import AnimationHandler
+    from gui.dialogs.dialog_manager import DialogManager
 
 
 class TransferManager:

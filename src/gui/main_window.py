@@ -10,33 +10,33 @@ from tkinter import messagebox, filedialog
 
 try:
     # Try relative import first (when used as module)
-    from ..adb_manager import ADBManager, is_adb_available
+    from ..core.adb_manager import ADBManager, is_adb_available
 except ImportError:
     # Fall back to direct import (when run directly)
-    from adb_manager import ADBManager, is_adb_available
+    from core.adb_manager import ADBManager, is_adb_available
 
 try:
     # Try relative imports first
-    from .file_browser import AndroidFileBrowser
-    from .animation_handler import AnimationHandler
-    from .device_manager import DeviceManager
-    from .dialog_manager import DialogManager
-    from .transfer_manager import TransferManager
-    from .ui_components import (
+    from .components.file_browser import AndroidFileBrowser
+    from .handlers.animation_handler import AnimationHandler
+    from .dialogs.dialog_manager import DialogManager
+    from .components.ui_components import (
         PathSelectorFrame, DirectionSelector, StatusLabel,
         TransferButton, LicenseManager
     )
+    from ..managers.device_manager import DeviceManager
+    from ..managers.transfer_manager import TransferManager
 except ImportError:
     # Fall back to direct imports
-    from src.gui.file_browser import AndroidFileBrowser
-    from src.gui.animation_handler import AnimationHandler
-    from src.gui.device_manager import DeviceManager
-    from src.gui.dialog_manager import DialogManager
-    from src.gui.transfer_manager import TransferManager
-    from src.gui.ui_components import (
+    from components.file_browser import AndroidFileBrowser
+    from handlers.animation_handler import AnimationHandler
+    from dialogs.dialog_manager import DialogManager
+    from components.ui_components import (
         PathSelectorFrame, DirectionSelector, StatusLabel,
         TransferButton, LicenseManager
     )
+    from managers.device_manager import DeviceManager
+    from managers.transfer_manager import TransferManager
 
 
 class AndroidFileHandlerGUI(tk.Tk):

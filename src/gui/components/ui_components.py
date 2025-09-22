@@ -8,9 +8,9 @@ from tkinter import messagebox
 from typing import Callable, Optional
 
 try:
-    from .license_agreement import LicenseAgreementFrame, check_license_agreement
+    from ..dialogs.license_agreement import LicenseAgreementFrame, check_license_agreement
 except ImportError:
-    from license_agreement import LicenseAgreementFrame, check_license_agreement
+    from gui.dialogs.license_agreement import LicenseAgreementFrame, check_license_agreement
 
 
 class PathSelectorFrame:
