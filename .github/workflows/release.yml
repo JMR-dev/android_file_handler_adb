@@ -55,7 +55,7 @@ jobs:
 
       - name: Run tests
         run: |
-          poetry run pytest -v
+          poetry run pytest tests/ -v
   
   run-unit-tests-windows:
     runs-on: windows-latest
@@ -69,6 +69,17 @@ jobs:
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Ensure Poetry is on PATH (Windows)
+        shell: pwsh
+        run: |
+          # Add Poetry user bin to PATH for subsequent steps in this job
+          $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
+          Write-Output $poetryPath >> $Env:GITHUB_PATH
 
       - name: Install dependencies
         run: |
@@ -76,7 +87,7 @@ jobs:
 
       - name: Run tests
         run: |
-          poetry run pytest -v
+          poetry run pytest tests/ -v
   build-windows:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
     if: contains(github.event.inputs.jobs, 'build-windows')
