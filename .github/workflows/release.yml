@@ -36,7 +36,7 @@ env:
   CI_CD: true
 
 jobs:
-  run-unit-tests:
+  run-unit-tests-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +56,29 @@ jobs:
       - name: Run tests
         run: |
           poetry run pytest -v
+  
+  run-unit-tests-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Install dependencies
+        run: |
+          poetry install
+
+      - name: Run tests
+        run: |
+          poetry run pytest -v
   build-windows:
+    needs: [run-unit-tests-linux, run-unit-tests-windows]
     if: contains(github.event.inputs.jobs, 'build-windows')
     runs-on: windows-latest
     steps:
@@ -100,6 +122,7 @@ jobs:
             dist/android-file-handler.exe
        
   build-debian:
+    needs: [run-unit-tests-linux, run-unit-tests-windows]
     if: contains(github.event.inputs.jobs, 'build-debian')
     env:
       DISTRO_TYPE: debian
@@ -184,6 +207,7 @@ jobs:
             pkg_dist_debian/**
 
   build-arch:
+    needs: [run-unit-tests-linux, run-unit-tests-windows]
     if: contains(github.event.inputs.jobs, 'build-arch')
     env:
       DISTRO_TYPE: arch
@@ -261,6 +285,7 @@ jobs:
 
 
   build-rhel:
+    needs: [run-unit-tests-linux, run-unit-tests-windows]
     if: contains(github.event.inputs.jobs, 'build-rhel')
     env:
       DISTRO_TYPE: rhel
@@ -359,7 +384,7 @@ jobs:
 
     
   create-release:
-    needs: [build-windows, build-debian, build-arch, build-rhel]
+    needs: [run-unit-tests-linux, run-unit-tests-windows, build-windows, build-debian, build-arch, build-rhel]
     if: ${{ github.event.inputs.DO_RELEASE == 'true' && needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
@@ -399,7 +424,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-s3:
-    needs: [build-windows, build-debian, build-arch, build-rhel]
+    needs: [run-unit-tests-linux, run-unit-tests-windows, build-windows, build-debian, build-arch, build-rhel]
     if: ${{ github.event.inputs.UPLOAD_S3 == 'true' || contains(github.event.inputs.jobs, 'upload-s3') }}
     runs-on: ubuntu-latest
     steps:
