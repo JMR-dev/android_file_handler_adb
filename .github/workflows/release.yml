@@ -36,6 +36,26 @@ env:
   CI_CD: true
 
 jobs:
+  run-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Install dependencies
+        run: |
+          poetry install
+
+      - name: Run tests
+        run: |
+          poetry run pytest -v
   build-windows:
     if: contains(github.event.inputs.jobs, 'build-windows')
     runs-on: windows-latest
