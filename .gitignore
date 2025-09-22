@@ -10,7 +10,7 @@ test-act.yml
 pkg_dist_debian
 pkg*
 .pytest*
-
+!pytest.ini
 # Python cache files
 __pycache__/
 *.py[cod]
