@@ -19,9 +19,9 @@ from typing import Optional
 import hashlib
 
 try:
-    from file_deduplication import FileDeduplicator
+    from utils.file_deduplication import FileDeduplicator
 except ImportError:
-    from .file_deduplication import FileDeduplicator
+    from ..utils.file_deduplication import FileDeduplicator
 
 def get_executable_directory() -> str:
     """Get the directory containing the executable or script."""
@@ -1029,133 +1029,7 @@ class ADBManager:
         return self.deduplicator.check_files_identical(
             local_path, remote_path, self.run_adb_command, algorithm
         )
-
-
-class LinuxMTPManager:
-    """Manages MTP operations on Linux systems."""
-
-    def __init__(self):
-        self.mount_point = "/tmp/android_mtp"
-
-    def mount_mtp_device(self) -> Optional[str]:
-        """Mount MTP device to filesystem using jmtpfs."""
-        try:
-            # Create mount point
-            os.makedirs(self.mount_point, exist_ok=True)
-
-            # Check if already mounted
-            result = subprocess.run(
-                ["mountpoint", self.mount_point], capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                return self.mount_point
-
-            # First, try to unmount any existing GVFS MTP mounts
-            self._unmount_gvfs_mtp()
-
-            # Kill any existing MTP processes that might be interfering
-            subprocess.run(["pkill", "-f", "gvfs-mtp"], capture_output=True)
-            subprocess.run(["pkill", "-f", "jmtpfs"], capture_output=True)
-
-            # Wait a moment for processes to clean up
-            time.sleep(1)
-
-            # Mount using jmtpfs
-            result = subprocess.run(
-                ["jmtpfs", self.mount_point], capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                return self.mount_point
-            else:
-                print(f"Failed to mount MTP device: {result.stderr}")
-                return None
-        except Exception as e:
-            print(f"Error mounting MTP device: {e}")
-            return None
-
-    def _unmount_gvfs_mtp(self):
-        """Unmount any GVFS MTP mounts."""
-        try:
-            # Find GVFS MTP mounts
-            result = subprocess.run(["mount"], capture_output=True, text=True)
-            for line in result.stdout.splitlines():
-                if "gvfs" in line and "mtp" in line:
-                    # Extract mount point from mount line
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        mount_point = parts[2]
-                        subprocess.run(
-                            ["fusermount", "-u", mount_point], capture_output=True
-                        )
-
-            # Also try to unmount common GVFS locations
-            gvfs_locations = ["/run/user/*/gvfs/mtp*", "/media/*", "~/.gvfs/mtp*"]
-
-            for location_pattern in gvfs_locations:
-                result = subprocess.run(
-                    ["find", "/run/user", "-name", "mtp*", "-type", "d"],
-                    capture_output=True,
-                    text=True,
-                )
-                for mount_point in result.stdout.strip().split("\n"):
-                    if mount_point:
-                        subprocess.run(
-                            ["fusermount", "-u", mount_point], capture_output=True
-                        )
-
-        except Exception as e:
-            print(f"Warning: Could not unmount GVFS MTP: {e}")
-
-    def unmount_mtp_device(self) -> bool:
-        """Unmount MTP device."""
-        try:
-            subprocess.run(["fusermount", "-u", self.mount_point], check=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to unmount: {e}")
-            return False
-
-    def find_gvfs_mtp_mount(self) -> Optional[str]:
-        """Find existing GVFS MTP mount point."""
-        try:
-            # Check common GVFS mount locations (Linux only)
-            if sys.platform.startswith("linux"):
-                try:
-                    if hasattr(os, "getuid"):
-                        user_id = os.getuid()  # type: ignore
-                        gvfs_patterns = [
-                            f"/run/user/{user_id}/gvfs/mtp*",
-                            "/media/*android*",
-                            "/media/*MTP*",
-                        ]
-                    else:
-                        # Fallback if getuid is not available
-                        gvfs_patterns = [
-                            "/run/user/*/gvfs/mtp*",
-                            "/media/*android*",
-                            "/media/*MTP*",
-                        ]
-                except (AttributeError, OSError):
-                    # Fallback if getuid is not available or fails
-                    gvfs_patterns = [
-                        "/run/user/*/gvfs/mtp*",
-                        "/media/*android*",
-                        "/media/*MTP*",
-                    ]
-
-                for pattern in gvfs_patterns:
-                    matches = glob.glob(pattern)
-                    if matches:
-                        # Return the first valid mount point
-                        for mount in matches:
-                            if os.path.isdir(mount):
-                                return mount
-            return None
-        except Exception as e:
-            print(f"Error finding GVFS mount: {e}")
-            return None
-
-
+    
 # Helper functions for standalone usage
 def is_adb_available() -> bool:
     """Check if ADB binary is available using the centralized resolver."""

@@ -8,9 +8,9 @@ from tkinter import messagebox
 from typing import Optional, Callable
 
 try:
-    from ..adb_manager import ADBManager, is_adb_available
+    from ..core.adb_manager import ADBManager, is_adb_available
 except ImportError:
-    from adb_manager import ADBManager, is_adb_available
+    from core.adb_manager import ADBManager, is_adb_available
 
 
 class DeviceManager:
