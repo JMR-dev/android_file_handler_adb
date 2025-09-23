@@ -1,0 +1,114 @@
+# Branch Protection Configuration Workflow
+# This workflow sets up branch protection rules for the repository
+# Only runs manually (workflow_dispatch) and only by repository owners on the main branch
+name: Configure Branch Protection
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch to protect (default: main)"
+        required: false
+        default: "main"
+        type: string
+      required_reviewers:
+        description: "Number of required approving reviews"
+        required: false
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+      dismiss_stale_reviews:
+        description: "Dismiss stale reviews when new commits are pushed"
+        required: false
+        default: true
+        type: boolean
+      enforce_admins:
+        description: "Enforce restrictions for administrators"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  configure-branch-protection:
+    runs-on: ubuntu-latest
+    # Security: Only run on main branch and only by repository owner/admin
+    if: ${{ github.ref == 'refs/heads/main' && (github.actor == github.repository_owner || contains(fromJSON('["JMR-dev"]'), github.actor)) }}
+    
+    steps:
+      - name: Display configuration
+        run: |
+          echo "Configuring branch protection for: ${{ github.event.inputs.target_branch }}"
+          echo "Required reviewers: ${{ github.event.inputs.required_reviewers }}"
+          echo "Dismiss stale reviews: ${{ github.event.inputs.dismiss_stale_reviews }}"
+          echo "Enforce for admins: ${{ github.event.inputs.enforce_admins }}"
+          echo "Triggered by: ${{ github.actor }}"
+
+      - name: Configure branch protection
+        run: |
+          # Define required status checks based on workflow jobs
+          REQUIRED_CHECKS='{
+            "strict": true,
+            "contexts": [
+              "run-unit-tests-linux",
+              "run-unit-tests-windows",
+              "build-windows",
+              "build-debian",
+              "build-arch",
+              "build-rhel"
+            ]
+          }'
+
+          # Define PR review requirements
+          PR_REVIEWS='{
+            "restrict_pushes": true,
+            "require_code_owner_reviews": false
+          }'
+
+          # Apply branch protection
+          gh api repos/${{ github.repository }}/branches/${{ github.event.inputs.target_branch }}/protection \
+            --method PUT \
+            --field required_status_checks="$REQUIRED_CHECKS" \
+            --field restrictions=null \
+            --field allow_deletions=false \
+            --field allow_force_pushes=false \
+            --field block_creations=false
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify configuration
+        run: |
+          echo "✅ Branch protection configured successfully!"
+          echo "The following jobs are now required status checks:"
+          echo "  - run-unit-tests-linux"
+          echo "  - run-unit-tests-windows"
+          echo "  - build-windows"
+          echo "  - build-debian"
+          echo "  - build-arch"
+          echo "  - build-rhel"
+          echo ""
+          echo "Pull request requirements:"
+          echo "  - ${{ github.event.inputs.required_reviewers }} approving review(s) required"
+          echo ""
+          echo "Additional protections:"
+          echo "  - Branch deletions: blocked"
+          echo "  - Force pushes: blocked"
+
+      - name: Display next steps
+        run: |
+          echo ""
+          echo "🔒 Branch protection is now active for '${{ github.event.inputs.target_branch }}'"
+          echo ""
+          echo "Next steps:"
+          echo "1. Create a pull request to test the protection rules"
+          echo "2. Verify that all required status checks appear"
+          echo "3. Confirm that the PR cannot be merged until all checks pass"
+          echo ""
+          echo "To view current protection settings:"
+          echo "  Repository Settings → Branches → ${{ github.event.inputs.target_branch }} → Edit"

@@ -6,7 +6,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('../../src/gui', 'gui'), 
-        ('../../src/platform-tools', 'platform-tools'),
         ('../windows/first_run_install.ps1', 'scripts/windows')
     ],
     hiddenimports=[

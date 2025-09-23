@@ -6,7 +6,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('../../src/gui', 'gui'),
-        ('../../src/platform-tools', 'platform-tools'),
         ('../../scripts/debian_postinst.sh', 'scripts'),
     ],
     hiddenimports=[
