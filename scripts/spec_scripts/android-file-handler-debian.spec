@@ -6,15 +6,37 @@ a = Analysis(
     binaries=[],
     datas=[
         ('../../src/gui', 'gui'),
+        ('../../src/platform-tools', 'platform-tools'),
         ('../../scripts/debian_postinst.sh', 'scripts'),
     ],
     hiddenimports=[
+        # GUI modules
         'gui',
-        'gui.file_browser',
-        'gui.license_agreement',
         'gui.main_window',
         'gui.progress_handler',
-        'adb_manager'
+        'gui.components',
+        'gui.components.file_browser',
+        'gui.components.ui_components',
+        'gui.dialogs',
+        'gui.dialogs.dialog_manager',
+        'gui.dialogs.license_agreement',
+        'gui.handlers',
+        'gui.handlers.animation_handler',
+        # Core modules
+        'core',
+        'core.adb_manager',
+        'core.adb_command',
+        'core.file_transfer',
+        'core.platform_tools',
+        'core.platform_utils',
+        'core.progress_tracker',
+        # Manager modules
+        'managers',
+        'managers.device_manager',
+        'managers.transfer_manager',
+        # Utility modules
+        'utils',
+        'utils.file_deduplication'
     ],
     hookspath=[],
     hooksconfig={},
