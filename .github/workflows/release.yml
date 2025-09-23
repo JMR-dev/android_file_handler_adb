@@ -1,17 +1,22 @@
 # Multi-platform build + packaging workflow
-# - Builds a pyinstaller executable on Windows, Debian, Arch, Rocky.
+# - Builds a pyinstaller executable on Windows, Debian, Arch, Fedora.
 # - Packages using fpm into .deb, .rpm, and pacman (.pkg.tar.zst) files with explicit filenames.
 # - Creates a GitHub Release with the produced artifacts.
 #
 # Notes:
 # - Poetry is installed via snok/install-poetry@v1 in all jobs.
 # - fpm gem is pinned to 1.16.0 in the examples; change as needed.
-# - Rocky job uses tarball downloads for pyenv and python-build (non-interactive, CI-friendly).
+# - Fedora job uses tarball downloads for pyenv and python-build (non-interactive, CI-friendly).
 name: Build Multi-Platform Binaries
 
 on:
   workflow_dispatch:
     inputs:
+      branch:
+        description: "Branch to build from"
+        required: false
+        default: "main"
+        type: string
       jobs:
         description: "Comma-separated jobs to run (e.g., build-windows,build-debian,build-arch,build-rhel)"
         required: true
@@ -24,6 +29,8 @@ on:
         description: "Set to 'true' to upload build artifacts to S3 after builds"
         required: false
         default: "false"
+  pull_request:
+    branches: [ main ]
 
 permissions:
   contents: write
@@ -40,6 +47,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
+
+      - name: Display build information
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Branch: ${{ github.event.inputs.branch || github.head_ref || github.ref }}"
+          echo "Jobs to run: ${{ github.event.inputs.jobs || 'build-windows,build-debian,build-arch,build-rhel' }}"
+          echo "Create release: ${{ github.event.inputs.DO_RELEASE || 'false' }}"
+          echo "Upload to S3: ${{ github.event.inputs.UPLOAD_S3 || 'false' }}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -61,6 +78,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -90,11 +109,13 @@ jobs:
           poetry run pytest tests/ -v
   build-windows:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: contains(github.event.inputs.jobs, 'build-windows')
+    if: ${{ github.event_name == 'pull_request' || contains(github.event.inputs.jobs, 'build-windows') }}
     runs-on: windows-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -134,7 +155,7 @@ jobs:
        
   build-debian:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: contains(github.event.inputs.jobs, 'build-debian')
+    if: ${{ github.event_name == 'pull_request' || contains(github.event.inputs.jobs, 'build-debian') }}
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
@@ -154,6 +175,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -219,7 +242,7 @@ jobs:
 
   build-arch:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: contains(github.event.inputs.jobs, 'build-arch')
+    if: ${{ github.event_name == 'pull_request' || contains(github.event.inputs.jobs, 'build-arch') }}
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
@@ -239,6 +262,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -297,13 +322,15 @@ jobs:
 
   build-rhel:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: contains(github.event.inputs.jobs, 'build-rhel')
+    if: ${{ github.event_name == 'pull_request' || contains(github.event.inputs.jobs, 'build-rhel') }}
     env:
       DISTRO_TYPE: rhel
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
 
       - name: Update OS and install Docker
         run: |
@@ -396,11 +423,13 @@ jobs:
     
   create-release:
     needs: [run-unit-tests-linux, run-unit-tests-windows, build-windows, build-debian, build-arch, build-rhel]
-    if: ${{ github.event.inputs.DO_RELEASE == 'true' && needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.DO_RELEASE == 'true' && needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
         
       - name: Install Poetry
         uses: snok/install-poetry@v1
@@ -436,11 +465,13 @@ jobs:
 
   upload-s3:
     needs: [run-unit-tests-linux, run-unit-tests-windows, build-windows, build-debian, build-arch, build-rhel]
-    if: ${{ github.event.inputs.UPLOAD_S3 == 'true' || contains(github.event.inputs.jobs, 'upload-s3') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.UPLOAD_S3 == 'true' || contains(github.event.inputs.jobs, 'upload-s3')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.head_ref || github.ref }}
 
       - name: Install AWS CLI
         run: |
@@ -479,6 +510,7 @@ jobs:
       - name: Checkout main repo
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
           fetch-depth: 0
 
       - name: Checkout wiki repo
