@@ -5,7 +5,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('../../src/gui', 'gui'),
-        ('../../src/platform-tools', 'platform-tools')
     ],
     hiddenimports=[
         # GUI modules
