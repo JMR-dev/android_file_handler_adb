@@ -15,14 +15,17 @@ class DistroType(Enum):
     RHEL = "rhel"
 
 
-def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def run_command(cmd: list[str], check: bool = True, working_dir: str = None) -> subprocess.CompletedProcess:
     """Run command and handle errors."""
     print(f"Running: {' '.join(cmd)}")
     try:
-        return subprocess.run(cmd, check=check, capture_output=False)
+        return subprocess.run(cmd, check=check, capture_output=False, cwd=working_dir)
     except subprocess.CalledProcessError as e:
         print(f"Command failed with exit code {e.returncode}: {' '.join(cmd)}")
         sys.exit(e.returncode)
+    except FileNotFoundError:
+        print(f"Command not found: {cmd[0]}")
+        sys.exit(1)
 
 
 def get_distro_config(distro_type: DistroType) -> dict:
@@ -72,18 +75,27 @@ def prompt_distro_selection() -> List[DistroType]:
             print("Invalid choice. Please enter 1, 2, 3, or 4.")
 
 
-def build_for_distro(distro_type: DistroType, version: str) -> None:
+def build_for_distro(distro_type: DistroType, version: str, project_root: Path) -> None:
     """Build package for specific distro type."""
     config = get_distro_config(distro_type)
     print(f"\n=== Building for {config['name']} ===")
     
+    # Construct absolute paths
+    spec_file = project_root / config['spec_file']
+    dist_dir = project_root / f"dist_{config['pkg_suffix']}"
+    
+    # Verify spec file exists
+    if not spec_file.exists():
+        print(f"ERROR: Spec file not found: {spec_file}")
+        sys.exit(1)
+    
     # Build with distro-specific spec file
-    print(f"Building binary using {config['spec_file']}")
+    print(f"Building binary using {spec_file}")
     run_command([
         "poetry", "run", "pyinstaller", 
-        config['spec_file'],
-        "--distpath", f"dist_{config['pkg_suffix']}"
-    ])
+        str(spec_file),
+        "--distpath", str(dist_dir)
+    ], working_dir=str(project_root))
     
     # Make binary executable
     binary_path = Path(f"dist_{config['pkg_suffix']}/android-file-handler")
@@ -161,6 +173,13 @@ StartupNotify=true
 
 
 def main():
+    # Get project root (parent of scripts directory)
+    project_root = Path(__file__).parent.parent.resolve()
+    print(f"Project root: {project_root}")
+    
+    # Change to project root
+    os.chdir(project_root)
+    
     # Check if running in CI/CD mode
     is_ci_cd = os.environ.get("CI_CD", "false").lower() == "true"
     
@@ -204,7 +223,7 @@ def main():
     
     # Build for selected distributions
     for distro_type in selected_distros:
-        build_for_distro(distro_type, version)
+        build_for_distro(distro_type, version, project_root)
     
     print(f"\n=== Build complete for: {', '.join([get_distro_config(d)['name'] for d in selected_distros])} ===")
     
