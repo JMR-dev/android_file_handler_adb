@@ -1,0 +1,53 @@
+name: Sync Wiki
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout wiki repo
+        id: checkout-wiki
+        continue-on-error: true
+        run: |
+          if git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki; then
+            echo "wiki_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "wiki_exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::Wiki repository not found. Create the first wiki page at https://github.com/${GITHUB_REPOSITORY}/wiki to enable auto-sync."
+          fi
+
+      - name: Sync WIKI.md to Wiki/Home.md
+        if: steps.checkout-wiki.outputs.wiki_exists == 'true'
+        run: |
+          SRC_FILE="WIKI.md"
+          DEST_FILE="wiki/Home.md"
+
+          if [ ! -f "$SRC_FILE" ]; then
+            echo "No $SRC_FILE in main repo; skipping."
+            exit 0
+          fi
+
+          if ! cmp -s "$SRC_FILE" "$DEST_FILE"; then
+            echo "Changes found, updating wiki..."
+            cp "$SRC_FILE" "$DEST_FILE"
+            cd wiki
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Home.md
+            git commit -m "Sync WIKI.md from main repo [skip ci]" || echo "No changes to commit"
+            git push
+          else
+            echo "No changes in $SRC_FILE; wiki is up to date."
+          fi
