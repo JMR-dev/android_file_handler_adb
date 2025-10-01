@@ -30,7 +30,7 @@ on:
         required: false
         default: "false"
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
 
 permissions:
   contents: write
