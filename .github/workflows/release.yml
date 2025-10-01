@@ -505,5 +505,6 @@ jobs:
     needs: create-release
     if: always() && needs.create-release.result == 'success'
     uses: ./.github/workflows/sync-wiki.yml
-    permissions:
-      contents: write
+    with:
+      branch: ${{ github.event.inputs.branch || github.ref }}
+    secrets: inherit
