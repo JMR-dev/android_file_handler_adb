@@ -323,6 +323,9 @@ jobs:
   build-rhel:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
     if: ${{ github.event_name == 'pull_request' || contains(github.event.inputs.jobs, 'build-rhel') }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: rhel
     runs-on: ubuntu-latest
