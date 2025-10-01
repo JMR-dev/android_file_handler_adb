@@ -12,7 +12,7 @@ try:
     from ..gui.handlers.animation_handler import AnimationHandler
     from ..gui.dialogs.dialog_manager import DialogManager
 except ImportError:
-    from device_manager import DeviceManager
+    from managers.device_manager import DeviceManager
     from gui.handlers.animation_handler import AnimationHandler
     from gui.dialogs.dialog_manager import DialogManager
 
@@ -67,56 +67,48 @@ class TransferManager:
         """
         self.controls_callback = callback
     
-    def start_transfer(self, direction: str, source_path: str, dest_path: str, 
+    def start_transfer(self, direction: str, source_path: str, dest_path: str,
                       completion_callback: Optional[Callable] = None) -> bool:
         """Start a file transfer operation.
-        
+
         Args:
             direction: Transfer direction ('pull' or 'push')
             source_path: Source file or folder path
             dest_path: Destination path
             completion_callback: Callback to call when transfer completes
-            
+
         Returns:
             True if transfer was started successfully, False otherwise
         """
         # Increment transfer ID for cancellation support
         self.current_transfer_id += 1
         transfer_id = self.current_transfer_id
-        
+
         # Determine if transferring a file or folder
         if direction == "pull":
             is_file = self._is_remote_file(source_path)
         else:
             is_file = os.path.isfile(source_path)
-            
+
         # Disable controls during transfer
         if 'disable_controls' in self.ui_callbacks:
             self.ui_callbacks['disable_controls']()
-        
+
         # Start transfer in background thread
         transfer_thread = threading.Thread(
             target=self._transfer_thread,
-            args=(direction, source_path, dest_path, transfer_id, is_file, completion_callback),
+            args=(direction, source_path, dest_path, transfer_id, is_file),
             daemon=True
         )
         transfer_thread.start()
         return True
-    
-    def cancel_transfer(self) -> None:
-        """Cancel the current transfer operation."""
-        # Increment transfer ID to invalidate current transfer
-        self.current_transfer_id += 1
-        
-        # Cancel ADB operation
-        self.device_manager.cancel_current_operation()
         
     def _is_remote_file(self, remote_path: str) -> bool:
         """Check if a remote path is a file.
-        
+
         Args:
             remote_path: Path on Android device
-            
+
         Returns:
             True if path is a file, False if it's a folder
         """
@@ -126,53 +118,7 @@ class TransferManager:
         except Exception:
             # If we can't determine, assume it's a folder for safety
             return False
-    
-    def _transfer_thread(self, direction: str, source_path: str, dest_path: str, 
-                        transfer_id: int, is_file: bool, completion_callback: Optional[Callable]):
-        """Handle file transfer in background thread.
-        
-        Args:
-            direction: Transfer direction ('pull' or 'push')
-            source_path: Source file or folder path
-            dest_path: Destination path
-            transfer_id: Transfer ID for cancellation
-            is_file: True if transferring a file
-            completion_callback: Callback for completion
-        """
-        try:
-            # Check if transfer is still valid
-            if transfer_id != self.current_transfer_id:
-                return
-                
-            # Get ADB manager from device manager
-            adb_manager = self.device_manager.adb_manager
-            
-            # Perform the transfer
-            if direction == "pull":
-                if is_file:
-                    success, stats = adb_manager.pull_file(source_path, dest_path)
-                else:
-                    success, stats = adb_manager.pull_folder(source_path, dest_path)
-                operation = "pulled from Android device"
-            else:  # push
-                if is_file:
-                    success, stats = adb_manager.push_file(source_path, dest_path)
-                else:
-                    success, stats = adb_manager.push_folder(source_path, dest_path)
-                operation = "pushed to Android device"
-            
-            # Check if transfer was cancelled
-            if transfer_id != self.current_transfer_id:
-                return
-            
-            # Call completion callback on main thread
-            if completion_callback:
-                self.parent.after(0, lambda: completion_callback(success, stats, operation))
-                
-        except Exception as e:
-            # Handle errors on main thread
-            if transfer_id == self.current_transfer_id and 'show_error' in self.ui_callbacks:
-                self.parent.after(0, lambda: self.ui_callbacks["show_error"](f"Transfer error: {str(e)}"))
+
     def cancel_transfer(self) -> bool:
         """Cancel the current transfer operation.
         

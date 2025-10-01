@@ -9,8 +9,8 @@ from typing import Optional, Callable, Dict, Any
 
 class ProgressTracker:
     """Tracks progress for file transfer operations."""
-    
-    def __init__(self):
+
+    def __init__(self) -> None:
         self.progress_callback: Optional[Callable[[int], None]] = None
         self.status_callback: Optional[Callable[[str], None]] = None
 
@@ -26,12 +26,12 @@ class ProgressTracker:
             'total_files': 0,
             'files_to_transfer': 0
         }
-    
-    def set_progress_callback(self, callback: Callable[[int], None]):
+
+    def set_progress_callback(self, callback: Callable[[int], None]) -> None:
         """Set callback function for progress updates."""
         self.progress_callback = callback
 
-    def set_status_callback(self, callback: Callable[[str], None]):
+    def set_status_callback(self, callback: Callable[[str], None]) -> None:
         """Set callback function for status updates."""
         self.status_callback = callback
 
@@ -77,12 +77,12 @@ class ProgressTracker:
             if self.progress_callback:
                 self.progress_callback(int(value))
 
-    def update_status(self, message: str):
+    def update_status(self, message: str) -> None:
         """Update status message."""
         if self.status_callback:
             self.status_callback(message)
 
-    def update_transfer_progress(self, current_file: int, total_files: int):
+    def update_transfer_progress(self, current_file: int, total_files: int) -> None:
         """Update transfer progress for file counting."""
         self.transfer_progress['current_file'] = current_file
         self.transfer_progress['total_files'] = total_files
@@ -91,15 +91,15 @@ class ProgressTracker:
         if self.status_callback:
             self.status_callback(progress_message)
 
-    def reset_transfer_progress(self):
+    def reset_transfer_progress(self) -> None:
         """Reset transfer progress counters."""
         self.transfer_progress = {
             'current_file': 0,
             'total_files': 0,
             'files_to_transfer': 0
         }
-    
-    def set_files_to_transfer(self, count: int):
+
+    def set_files_to_transfer(self, count: int) -> None:
         """Set the total number of files to transfer."""
         self.transfer_progress['files_to_transfer'] = count
 
