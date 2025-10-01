@@ -444,20 +444,20 @@ jobs:
           merge-multiple: true
           path: ./binaries
 
-      - name: List downloaded binaries (debug)
+      - name: Prepare release files
         run: |
-          echo "Downloaded files:"
-          ls -la ./binaries || true        
+          mkdir -p ./release-files
+          find ./binaries -name "*.exe" -exec cp {} ./release-files/ \; || true
+          find ./binaries -name "*.deb" -exec cp {} ./release-files/ \; || true
+          find ./binaries -name "*.rpm" -exec cp {} ./release-files/ \; || true
+          find ./binaries -name "*.pkg.tar.*" -exec cp {} ./release-files/ \; || true
+        
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
-          files: |
-            ./binaries/android-file-handler.exe
-            ./binaries/android-file-handler_*.deb
-            ./binaries/android-file-handler-*.rpm
-            ./binaries/android-file-handler-*-x86_64.pkg.tar.*
+          files: ./release-files/*
           draft: false
           prerelease: false
         env:
