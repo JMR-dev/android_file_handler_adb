@@ -115,7 +115,7 @@ class ADBManager:
         except Exception:
             return []
     
-    def is_device_connected(self, device_id: str = None) -> bool:
+    def is_device_connected(self, device_id: Optional[str] = None) -> bool:
         """Check if a specific device is connected."""
         devices = self.get_devices()
         if not devices:
@@ -135,7 +135,7 @@ class ADBManager:
         """Get the currently selected device."""
         return self.selected_device
     
-    def list_files(self, path: str, device_id: str = None) -> list[dict]:
+    def list_files(self, path: str, device_id: Optional[str] = None) -> list[dict]:
         """List files in the specified path on the device."""
         device_args = []
         target_device = device_id or self.selected_device
@@ -192,9 +192,9 @@ class ADBManager:
         except Exception:
             return []
     
-    def pull_file(self, remote_path: str, local_path: str, 
+    def pull_file(self, remote_path: str, local_path: str,
                   progress_callback: Optional[Callable[[int, int], None]] = None,
-                  device_id: str = None) -> Tuple[bool, str]:
+                  device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Pull a file from device to local system."""
         try:
             # Create local directory if it doesn't exist
@@ -217,7 +217,7 @@ class ADBManager:
     
     def pull_folder(self, remote_path: str, local_path: str,
                     progress_callback: Optional[Callable[[int, int], None]] = None,
-                    device_id: str = None) -> Tuple[bool, str]:
+                    device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Pull a folder from device to local system."""
         try:
             # Create local directory
@@ -237,7 +237,7 @@ class ADBManager:
     
     def push_file(self, local_path: str, remote_path: str,
                   progress_callback: Optional[Callable[[int, int], None]] = None,
-                  device_id: str = None) -> Tuple[bool, str]:
+                  device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Push a file from local system to device."""
         try:
             if not os.path.exists(local_path):
@@ -254,7 +254,7 @@ class ADBManager:
     
     def push_folder(self, local_path: str, remote_path: str,
                     progress_callback: Optional[Callable[[int, int], None]] = None,
-                    device_id: str = None) -> Tuple[bool, str]:
+                    device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Push a folder from local system to device."""
         try:
             if not os.path.exists(local_path):
@@ -269,15 +269,15 @@ class ADBManager:
         except Exception as e:
             return False, f"Error pushing folder: {str(e)}"
     
-    def delete_file(self, remote_path: str, device_id: str = None) -> Tuple[bool, str]:
+    def delete_file(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Delete a file on the device."""
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
             device_args = ["-s", target_device]
-        
+
         args = device_args + ["shell", "rm", "-f", remote_path]
-        
+
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
             if returncode == 0:
@@ -286,16 +286,16 @@ class ADBManager:
                 return False, f"Failed to delete file: {stderr}"
         except Exception as e:
             return False, f"Error deleting file: {str(e)}"
-    
-    def create_folder(self, remote_path: str, device_id: str = None) -> Tuple[bool, str]:
+
+    def create_folder(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Create a folder on the device."""
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
             device_args = ["-s", target_device]
-        
+
         args = device_args + ["shell", "mkdir", "-p", remote_path]
-        
+
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
             if returncode == 0:
@@ -304,16 +304,16 @@ class ADBManager:
                 return False, f"Failed to create folder: {stderr}"
         except Exception as e:
             return False, f"Error creating folder: {str(e)}"
-    
-    def delete_folder(self, remote_path: str, device_id: str = None) -> Tuple[bool, str]:
+
+    def delete_folder(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Delete a folder on the device."""
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
             device_args = ["-s", target_device]
-        
+
         args = device_args + ["shell", "rm", "-rf", remote_path]
-        
+
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
             if returncode == 0:
@@ -322,16 +322,16 @@ class ADBManager:
                 return False, f"Failed to delete folder: {stderr}"
         except Exception as e:
             return False, f"Error deleting folder: {str(e)}"
-    
-    def move_item(self, old_path: str, new_path: str, device_id: str = None) -> Tuple[bool, str]:
+
+    def move_item(self, old_path: str, new_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Move/rename a file or folder on the device."""
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
             device_args = ["-s", target_device]
-        
+
         args = device_args + ["shell", "mv", old_path, new_path]
-        
+
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
             if returncode == 0:
@@ -340,8 +340,8 @@ class ADBManager:
                 return False, f"Failed to move item: {stderr}"
         except Exception as e:
             return False, f"Error moving item: {str(e)}"
-    
-    def get_file_info(self, remote_path: str, device_id: str = None) -> Optional[dict]:
+
+    def get_file_info(self, remote_path: str, device_id: Optional[str] = None) -> Optional[dict]:
         """Get information about a file or folder on the device."""
         device_args = []
         target_device = device_id or self.selected_device
@@ -390,19 +390,59 @@ class ADBManager:
         except Exception:
             return None
     
+    def pull_folder_with_dedup(self, remote_path: str, local_path: str,
+                              progress_callback: Optional[Callable[[int, int], None]] = None,
+                              device_id: Optional[str] = None) -> Tuple[bool, Optional[dict]]:
+        """Pull a folder from device with deduplication support.
+
+        Args:
+            remote_path: Remote folder path on device
+            local_path: Local destination path
+            progress_callback: Optional progress callback
+            device_id: Optional specific device ID
+
+        Returns:
+            Tuple of (success, stats_dict) where stats contains transfer information
+        """
+        # For now, just call the regular pull_folder
+        # TODO: Implement actual deduplication logic
+        success, message = self.pull_folder(remote_path, local_path, progress_callback, device_id)
+        stats = {'message': message} if success else None
+        return success, stats
+
+    def push_folder_with_dedup(self, local_path: str, remote_path: str,
+                              progress_callback: Optional[Callable[[int, int], None]] = None,
+                              device_id: Optional[str] = None) -> Tuple[bool, Optional[dict]]:
+        """Push a folder to device with deduplication support.
+
+        Args:
+            local_path: Local folder path
+            remote_path: Remote destination path on device
+            progress_callback: Optional progress callback
+            device_id: Optional specific device ID
+
+        Returns:
+            Tuple of (success, stats_dict) where stats contains transfer information
+        """
+        # For now, just call the regular push_folder
+        # TODO: Implement actual deduplication logic
+        success, message = self.push_folder(local_path, remote_path, progress_callback, device_id)
+        stats = {'message': message} if success else None
+        return success, stats
+
     def deduplicate_files(self, folder_path: str, progress_callback: Optional[Callable[[str], None]] = None) -> Tuple[int, list]:
         """Find and optionally remove duplicate files in a folder."""
         deduplicator = FileDeduplicator()
-        
+
         if progress_callback:
             deduplicator.set_progress_callback(progress_callback)
-        
+
         duplicates = deduplicator.find_duplicates(folder_path)
-        
+
         if duplicates:
             removed_count = deduplicator.remove_duplicates(duplicates)
             return removed_count, duplicates
-        
+
         return 0, []
 
     # --- Legacy/compatibility helpers expected by older tests ---

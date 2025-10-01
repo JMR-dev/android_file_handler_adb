@@ -24,6 +24,10 @@ poetry run python -m src.main
 
 ### Testing
 ```sh
+
+# Test if application runs
+poetry run python -m src.main
+
 # Run all tests
 poetry run pytest tests/ -v
 
@@ -128,6 +132,7 @@ The project uses GitHub Actions for multi-platform builds (`.github/workflows/re
 - Always run Python commands through Poetry
 - Do not recreate deleted files
 - Do not change user-facing text unless asked
+- Always run the application to test if it will run and have it run successfully before declaring an iteration complete
 
 ## Notes
 

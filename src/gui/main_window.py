@@ -16,7 +16,7 @@ except ImportError:
     from core.adb_manager import ADBManager, is_adb_available
 
 try:
-    # Try relative imports first
+    # Try relative imports first (when used as module)
     from .components.file_browser import AndroidFileBrowser
     from .handlers.animation_handler import AnimationHandler
     from .dialogs.dialog_manager import DialogManager
@@ -27,11 +27,11 @@ try:
     from ..managers.device_manager import DeviceManager
     from ..managers.transfer_manager import TransferManager
 except ImportError:
-    # Fall back to direct imports
-    from components.file_browser import AndroidFileBrowser
-    from handlers.animation_handler import AnimationHandler
-    from dialogs.dialog_manager import DialogManager
-    from components.ui_components import (
+    # Fall back to absolute imports from src package
+    from gui.components.file_browser import AndroidFileBrowser
+    from gui.handlers.animation_handler import AnimationHandler
+    from gui.dialogs.dialog_manager import DialogManager
+    from gui.components.ui_components import (
         PathSelectorFrame, DirectionSelector, StatusLabel,
         TransferButton, LicenseManager
     )
