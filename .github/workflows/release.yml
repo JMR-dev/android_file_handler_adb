@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   # change this if you prefer a different pinned fpm version
