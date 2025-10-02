@@ -120,7 +120,9 @@ class TestSanitizeLocalPath:
         """Test that paths within base_dir are accepted."""
         base = "/tmp/safe"
         result = sanitize_local_path("/tmp/safe/subdir", base_dir=base)
-        assert result.startswith(base)
+        # result is an absolute path, so we need to compare absolute versions
+        base_abs = os.path.abspath(base)
+        assert result.startswith(base_abs)
 
     def test_path_normalization(self):
         """Test that paths with .. are normalized."""
