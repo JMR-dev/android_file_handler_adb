@@ -131,12 +131,16 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
 
             # Check for path traversal in zip entries
             for info in zf.infolist():
-                # Normalize the path and ensure it doesn't escape
-                # Use realpath to resolve any symlinks and get absolute path
+                # Normalize the path and ensure it doesn't escape tmp_dir
+                # Both paths need to be normalized to use the same separator (important for Windows)
                 normalized = os.path.normpath(os.path.join(tmp_dir, info.filename))
-                # On Windows, tmp_dir might not have a trailing separator, so add it
-                tmp_dir_with_sep = tmp_dir if tmp_dir.endswith(os.sep) else tmp_dir + os.sep
-                if not (normalized.startswith(tmp_dir_with_sep) or normalized == tmp_dir):
+                tmp_dir_normalized = os.path.normpath(tmp_dir)
+
+                # Ensure tmp_dir has a trailing separator for proper prefix matching
+                tmp_dir_with_sep = tmp_dir_normalized if tmp_dir_normalized.endswith(os.sep) else tmp_dir_normalized + os.sep
+
+                # Check if normalized path is within tmp_dir
+                if not (normalized.startswith(tmp_dir_with_sep) or normalized == tmp_dir_normalized):
                     raise RuntimeError(f"Zip contains path traversal: {info.filename}")
 
             zf.extractall(tmp_dir)
