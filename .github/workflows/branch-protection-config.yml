@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   configure-branch-protection:
