@@ -9,7 +9,6 @@ from src.utils.security_utils import (
     sanitize_android_path,
     sanitize_local_path,
     validate_device_id,
-    escape_shell_arg,
 )
 
 
@@ -53,6 +52,11 @@ class TestSanitizeAndroidPath:
     def test_valid_relative_path(self):
         """Test that valid relative paths are accepted."""
         assert sanitize_android_path("./folder/file.txt") == "./folder/file.txt"
+
+    def test_path_with_spaces(self):
+        """Test that paths with spaces are allowed."""
+        assert sanitize_android_path("/sdcard/My Photos/vacation.jpg") == "/sdcard/My Photos/vacation.jpg"
+        assert sanitize_android_path("/sdcard/DCIM/Camera Roll/IMG_001.jpg") == "/sdcard/DCIM/Camera Roll/IMG_001.jpg"
 
     def test_empty_path(self):
         """Test that empty paths are rejected."""
@@ -150,25 +154,6 @@ class TestValidateDeviceId:
         for char in dangerous_chars:
             with pytest.raises(ValueError):
                 validate_device_id(f"device{char}123")
-
-
-class TestEscapeShellArg:
-    """Tests for escape_shell_arg function."""
-
-    def test_safe_argument(self):
-        """Test that safe arguments are passed through."""
-        assert escape_shell_arg("safe-file_name.txt") == "safe-file_name.txt"
-
-    def test_empty_argument(self):
-        """Test that empty arguments are handled."""
-        assert escape_shell_arg("") == ""
-
-    def test_shell_metacharacters(self):
-        """Test that shell metacharacters are rejected."""
-        dangerous_chars = [';', '|', '&', '$', '`', '>', '<', '(', ')', '*']
-        for char in dangerous_chars:
-            with pytest.raises(ValueError, match="shell metacharacter"):
-                escape_shell_arg(f"arg{char}value")
 
 
 class TestSecurityIntegration:

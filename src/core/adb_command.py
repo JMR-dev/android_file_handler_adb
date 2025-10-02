@@ -10,11 +10,6 @@ from typing import Optional, Tuple, Union
 
 from .platform_tools import get_adb_binary_path
 
-try:
-    from ..utils.security_utils import validate_device_id, sanitize_android_path
-except ImportError:
-    from utils.security_utils import validate_device_id, sanitize_android_path
-
 
 class ADBCommandRunner:
     """Handles ADB command execution and device communication."""

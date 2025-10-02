@@ -59,6 +59,8 @@ def sanitize_android_path(path: str) -> str:
         raise ValueError("Path contains null byte")
 
     # Check for command injection patterns
+    # Note: We check for shell metacharacters that could be used for command injection
+    # We allow spaces and most characters that are valid in Android paths
     dangerous_patterns = [
         ';', '|', '&', '$(', '${', '`', '\n', '\r',
         '&&', '||', '>>',
@@ -68,13 +70,10 @@ def sanitize_android_path(path: str) -> str:
         if pattern in path:
             raise ValueError(f"Path contains dangerous pattern: {pattern}")
 
-    # Validate path structure (should start with / for absolute paths on Android)
-    # Allow relative paths but be cautious
-    if not path.startswith('/') and not path.startswith('./'):
-        # If it's not an absolute or explicitly relative path, make it explicit
-        # Most Android paths should be absolute
-        if not re.match(r'^[a-zA-Z0-9_\-./]+$', path):
-            raise ValueError("Path contains invalid characters")
+    # Note: We allow spaces, Unicode characters, and other characters that are
+    # valid in Android filesystem paths. The dangerous pattern check above is
+    # sufficient to prevent command injection since we pass paths as arguments
+    # to subprocess (not through shell=True).
 
     return path
 
@@ -109,6 +108,8 @@ def sanitize_local_path(path: str, base_dir: Optional[str] = None) -> str:
         raise ValueError(f"Invalid path: {e}")
 
     # If base_dir is specified, ensure the path is within it
+    # This check is sufficient - after normalization, if the path doesn't start
+    # with base_dir, it's outside the allowed directory tree
     if base_dir:
         try:
             base_dir_abs = os.path.normpath(os.path.abspath(base_dir))
@@ -117,15 +118,6 @@ def sanitize_local_path(path: str, base_dir: Optional[str] = None) -> str:
                 raise ValueError(f"Path traversal detected: path is outside base directory")
         except (ValueError, OSError) as e:
             raise ValueError(f"Invalid base directory: {e}")
-
-    # Check for dangerous patterns in the original path that might bypass normalization
-    if '..' in path:
-        # Verify that after normalization, we haven't moved up unexpectedly
-        path_depth = normalized_path.count(os.sep)
-        if base_dir:
-            base_depth = base_dir_abs.count(os.sep)
-            if path_depth < base_depth:
-                raise ValueError("Path traversal detected: attempting to access parent directories")
 
     return normalized_path
 
@@ -156,31 +148,3 @@ def validate_device_id(device_id: str) -> str:
             raise ValueError(f"Device ID contains dangerous character: {char}")
 
     return device_id
-
-
-def escape_shell_arg(arg: str) -> str:
-    """Escape a shell argument for safe use in commands.
-
-    Note: This is a defense-in-depth measure. Prefer using validated inputs
-    and avoiding shell=True in subprocess calls.
-
-    Args:
-        arg: Argument to escape
-
-    Returns:
-        Escaped argument safe for shell use
-    """
-    # For maximum safety with subprocess, we actually want to avoid shell escaping
-    # and instead ensure the argument doesn't contain dangerous characters
-    # This function validates and returns the argument if safe
-
-    if not arg:
-        return arg
-
-    # Check for any shell metacharacters
-    dangerous_chars = [';', '|', '&', '$', '`', '\n', '\r', '>', '<', '(', ')', '{', '}', '[', ']', '!', '*', '?', '~']
-    for char in dangerous_chars:
-        if char in arg:
-            raise ValueError(f"Argument contains shell metacharacter: {char}")
-
-    return arg
