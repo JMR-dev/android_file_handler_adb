@@ -36,7 +36,7 @@ pytest-mock = "^3.11.0"
 pytest-cov = "^4.1.0"
 
 [tool.poetry.group.build.dependencies]
-pyinstaller = "^5.13.0"
+pyinstaller = "^6.1.0"
 
 [tool.black]
 line-length = 88
