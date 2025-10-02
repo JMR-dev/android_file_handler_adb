@@ -26,6 +26,11 @@ try:
 except ImportError:
     from ..utils.file_deduplication import FileDeduplicator
 
+try:
+    from ..utils.security_utils import sanitize_android_path, validate_device_id
+except ImportError:
+    from utils.security_utils import sanitize_android_path, validate_device_id
+
 
 OS_TYPE = sys.platform
 
@@ -137,12 +142,23 @@ class ADBManager:
     
     def list_files(self, path: str, device_id: Optional[str] = None) -> list[dict]:
         """List files in the specified path on the device."""
+        # Sanitize inputs to prevent command injection
+        try:
+            sanitized_path = sanitize_android_path(path)
+        except ValueError as e:
+            # Return empty list if path is invalid
+            return []
+
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
-            device_args = ["-s", target_device]
-        
-        args = device_args + ["shell", "ls", "-la", path]
+            try:
+                validated_device = validate_device_id(target_device)
+                device_args = ["-s", validated_device]
+            except ValueError:
+                return []
+
+        args = device_args + ["shell", "ls", "-la", sanitized_path]
         
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
@@ -271,12 +287,22 @@ class ADBManager:
     
     def delete_file(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Delete a file on the device."""
+        # Sanitize inputs to prevent command injection
+        try:
+            sanitized_path = sanitize_android_path(remote_path)
+        except ValueError as e:
+            return False, f"Invalid path: {str(e)}"
+
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
-            device_args = ["-s", target_device]
+            try:
+                validated_device = validate_device_id(target_device)
+                device_args = ["-s", validated_device]
+            except ValueError as e:
+                return False, f"Invalid device ID: {str(e)}"
 
-        args = device_args + ["shell", "rm", "-f", remote_path]
+        args = device_args + ["shell", "rm", "-f", sanitized_path]
 
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
@@ -289,12 +315,22 @@ class ADBManager:
 
     def create_folder(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Create a folder on the device."""
+        # Sanitize inputs to prevent command injection
+        try:
+            sanitized_path = sanitize_android_path(remote_path)
+        except ValueError as e:
+            return False, f"Invalid path: {str(e)}"
+
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
-            device_args = ["-s", target_device]
+            try:
+                validated_device = validate_device_id(target_device)
+                device_args = ["-s", validated_device]
+            except ValueError as e:
+                return False, f"Invalid device ID: {str(e)}"
 
-        args = device_args + ["shell", "mkdir", "-p", remote_path]
+        args = device_args + ["shell", "mkdir", "-p", sanitized_path]
 
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
@@ -307,12 +343,22 @@ class ADBManager:
 
     def delete_folder(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Delete a folder on the device."""
+        # Sanitize inputs to prevent command injection
+        try:
+            sanitized_path = sanitize_android_path(remote_path)
+        except ValueError as e:
+            return False, f"Invalid path: {str(e)}"
+
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
-            device_args = ["-s", target_device]
+            try:
+                validated_device = validate_device_id(target_device)
+                device_args = ["-s", validated_device]
+            except ValueError as e:
+                return False, f"Invalid device ID: {str(e)}"
 
-        args = device_args + ["shell", "rm", "-rf", remote_path]
+        args = device_args + ["shell", "rm", "-rf", sanitized_path]
 
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
@@ -325,12 +371,23 @@ class ADBManager:
 
     def move_item(self, old_path: str, new_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
         """Move/rename a file or folder on the device."""
+        # Sanitize inputs to prevent command injection
+        try:
+            sanitized_old_path = sanitize_android_path(old_path)
+            sanitized_new_path = sanitize_android_path(new_path)
+        except ValueError as e:
+            return False, f"Invalid path: {str(e)}"
+
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
-            device_args = ["-s", target_device]
+            try:
+                validated_device = validate_device_id(target_device)
+                device_args = ["-s", validated_device]
+            except ValueError as e:
+                return False, f"Invalid device ID: {str(e)}"
 
-        args = device_args + ["shell", "mv", old_path, new_path]
+        args = device_args + ["shell", "mv", sanitized_old_path, sanitized_new_path]
 
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
@@ -343,12 +400,22 @@ class ADBManager:
 
     def get_file_info(self, remote_path: str, device_id: Optional[str] = None) -> Optional[dict]:
         """Get information about a file or folder on the device."""
+        # Sanitize inputs to prevent command injection
+        try:
+            sanitized_path = sanitize_android_path(remote_path)
+        except ValueError:
+            return None
+
         device_args = []
         target_device = device_id or self.selected_device
         if target_device:
-            device_args = ["-s", target_device]
-        
-        args = device_args + ["shell", "ls", "-la", remote_path]
+            try:
+                validated_device = validate_device_id(target_device)
+                device_args = ["-s", validated_device]
+            except ValueError:
+                return None
+
+        args = device_args + ["shell", "ls", "-la", sanitized_path]
         
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
