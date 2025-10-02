@@ -1,91 +1,24 @@
-# Multi-platform build + packaging workflow
-# - Builds a pyinstaller executable on Windows, Debian, Arch, Fedora.
-# - Packages using fpm into .deb, .rpm, and pacman (.pkg.tar.zst) files with explicit filenames.
-# - Creates a GitHub Release with the produced artifacts.
-#
-# Notes:
-# - Poetry is installed via snok/install-poetry@v1 in all jobs.
-# - fpm gem is pinned to 1.16.0 in the examples; change as needed.
-# - Fedora job uses tarball downloads for pyenv and python-build (non-interactive, CI-friendly).
-name: Build Multi-Platform Binaries
+# Status checks workflow for pull requests
+# Runs tests and builds on all platforms to verify code quality
+name: Status Checks
 
 on:
-  workflow_dispatch:
-    inputs:
-      jobs:
-        description: "Comma-separated jobs to run (e.g., build-windows,build-debian,build-arch,build-rhel)"
-        required: true
-        default: "build-windows,build-debian,build-arch,build-rhel"
+  pull_request:
+    branches: [ main, develop ]
 
 permissions:
-  contents: write
+  contents: read
+  packages: read
 
 env:
-  # change this if you prefer a different pinned fpm version
   FPM_VERSION: "1.16.0"
-  # Personal Access Token for HTTPS git operations (populate in repository secrets)
-  CI_CD_PAT: ${{ secrets.CI_CD_PAT }}
   CI_CD: true
 
 jobs:
-  merge-develop-to-main:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Fast-forward main to develop
-        run: |
-          set -e
-          git fetch origin main develop
-
-          # Verify develop is ahead of main
-          MERGE_BASE=$(git merge-base origin/main origin/develop)
-          MAIN_SHA=$(git rev-parse origin/main)
-
-          if [ "$MERGE_BASE" != "$MAIN_SHA" ]; then
-            echo "::error::Main branch has commits not in develop. Cannot fast-forward."
-            echo "::error::Please merge or rebase main into develop first."
-            exit 1
-          fi
-
-          # Ensure develop is actually ahead
-          DEVELOP_SHA=$(git rev-parse origin/develop)
-          if [ "$MAIN_SHA" = "$DEVELOP_SHA" ]; then
-            echo "Main is already up to date with develop. Nothing to merge."
-            exit 0
-          fi
-
-          # Fast-forward merge develop into main
-          git checkout main
-          git merge origin/develop --ff-only
-
-          echo "Successfully fast-forwarded main to develop"
-          git log origin/main..HEAD --oneline
-
-          git push origin main
-
   run-unit-tests-linux:
-    needs: [merge-develop-to-main]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Display build information
-        run: |
-          echo "Event: ${{ github.event_name }}"
-          echo "Jobs to run: ${{ github.event.inputs.jobs || 'build-windows,build-debian,build-arch,build-rhel' }}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -102,14 +35,11 @@ jobs:
       - name: Run tests
         run: |
           poetry run pytest tests/ -v
-  
+
   run-unit-tests-windows:
-    needs: [merge-develop-to-main]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -137,15 +67,13 @@ jobs:
       - name: Run tests
         run: |
           poetry run pytest tests/ -v
+
   build-windows:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-windows') }}
     runs-on: windows-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -182,10 +110,9 @@ jobs:
           path: |
             dist/**/android-file-handler*.exe
             dist/android-file-handler.exe
-       
+
   build-debian:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-debian') }}
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
@@ -205,8 +132,6 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -272,7 +197,6 @@ jobs:
 
   build-arch:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-arch') }}
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
@@ -292,8 +216,6 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -349,10 +271,8 @@ jobs:
             dist/*.pkg.tar.*
             pkg_dist_arch/**
 
-
   build-rhel:
     needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-rhel') }}
     permissions:
       contents: read
       packages: read
@@ -364,8 +284,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Build RHEL package
         run: |
@@ -402,93 +320,3 @@ jobs:
           path: |
             dist/*.rpm
             pkg_dist_rhel/**
-
-
-    
-  do-release:
-    needs: [build-windows, build-debian, build-arch, build-rhel]
-    if: ${{ needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-
-      - name: Get version
-        id: version
-        run: echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: ./binaries
-
-      - name: Prepare release files
-        run: |
-          mkdir -p ./release-files
-          find ./binaries -name "*.exe" -exec cp {} ./release-files/ \; || true
-          find ./binaries -name "*.deb" -exec cp {} ./release-files/ \; || true
-          find ./binaries -name "*.rpm" -exec cp {} ./release-files/ \; || true
-          find ./binaries -name "*.pkg.tar.*" -exec cp {} ./release-files/ \; || true
-        
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
-          files: ./release-files/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-s3:
-    needs: [build-windows, build-debian, build-arch, build-rhel]
-    if: ${{ needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Install AWS CLI
-        run: |
-          python -m pip install --upgrade pip awscli
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: ./binaries
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Upload artifacts to S3
-        run: |
-          set -euo pipefail
-          if [ -z "${{ secrets.S3_BUCKET }}" ]; then
-            echo "S3_BUCKET secret not set; skipping upload"
-            exit 0
-          fi
-          aws s3 sync ./binaries s3://${{ secrets.S3_BUCKET }}/builds/${{ github.run_id }}/ --acl private
-        env:
-          AWS_PAGER: ""
-  
-  sync-wiki:
-    needs: do-release
-    if: always() && needs.do-release.result == 'success'
-    uses: ./.github/workflows/sync-wiki.yml
-    with:
-      branch: main
-    secrets: inherit
