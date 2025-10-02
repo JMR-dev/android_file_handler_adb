@@ -94,17 +94,48 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
             raise RuntimeError("Unsupported platform for platform-tools download")
 
         # download in streaming fashion to avoid memory pressure
-        resp = requests.get(url, stream=True, timeout=30)
+        resp = requests.get(url, stream=True, timeout=30, allow_redirects=True)
         resp.raise_for_status()
 
+        # Validate that we're downloading from Google's servers (prevent redirect attacks)
+        if not resp.url.startswith("https://dl.google.com/android/"):
+            raise RuntimeError(f"Redirect to untrusted domain: {resp.url}")
+
+        # Check Content-Type to ensure we're getting a zip file
+        content_type = resp.headers.get('Content-Type', '')
+        if content_type and 'zip' not in content_type.lower() and 'octet-stream' not in content_type.lower():
+            raise RuntimeError(f"Unexpected content type: {content_type}")
+
         zip_path = os.path.join(tmp_dir, "platform-tools.zip")
+        downloaded_size = 0
+        max_size = 200 * 1024 * 1024  # 200MB limit to prevent zip bombs
+
         with open(zip_path, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=8192):
                 if chunk:
+                    downloaded_size += len(chunk)
+                    if downloaded_size > max_size:
+                        raise RuntimeError("Downloaded file exceeds maximum size limit")
                     fh.write(chunk)
 
-        # extract
+        # Validate zip file before extraction
+        if not zipfile.is_zipfile(zip_path):
+            raise RuntimeError("Downloaded file is not a valid zip archive")
+
+        # extract with safety checks
         with zipfile.ZipFile(zip_path, "r") as zf:
+            # Check for zip bomb (excessive compression ratio)
+            total_size = sum(info.file_size for info in zf.infolist())
+            if total_size > 500 * 1024 * 1024:  # 500MB uncompressed limit
+                raise RuntimeError("Zip archive uncompressed size exceeds safety limit")
+
+            # Check for path traversal in zip entries
+            for info in zf.infolist():
+                # Normalize the path and ensure it doesn't escape
+                normalized = os.path.normpath(os.path.join(tmp_dir, info.filename))
+                if not normalized.startswith(tmp_dir):
+                    raise RuntimeError(f"Zip contains path traversal: {info.filename}")
+
             zf.extractall(tmp_dir)
 
         # the zip contains a top-level platform-tools directory; move that into target_dir
