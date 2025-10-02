@@ -392,11 +392,35 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Rebase develop onto main
+      - name: Fast-forward main to develop
         run: |
+          set -e
           git fetch origin main develop
+
+          # Verify develop is ahead of main
+          MERGE_BASE=$(git merge-base origin/main origin/develop)
+          MAIN_SHA=$(git rev-parse origin/main)
+
+          if [ "$MERGE_BASE" != "$MAIN_SHA" ]; then
+            echo "::error::Main branch has commits not in develop. Cannot fast-forward."
+            echo "::error::Please merge or rebase main into develop first."
+            exit 1
+          fi
+
+          # Ensure develop is actually ahead
+          DEVELOP_SHA=$(git rev-parse origin/develop)
+          if [ "$MAIN_SHA" = "$DEVELOP_SHA" ]; then
+            echo "Main is already up to date with develop. Nothing to merge."
+            exit 0
+          fi
+
+          # Fast-forward merge develop into main
           git checkout main
-          git rebase origin/develop
+          git merge origin/develop --ff-only
+
+          echo "Successfully fast-forwarded main to develop"
+          git log origin/main..HEAD --oneline
+
           git push origin main
 
       - name: Install Poetry
