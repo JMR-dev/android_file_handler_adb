@@ -43,12 +43,13 @@ class TestADBFileTransfer:
         mock_runner = MagicMock()
         mock_runner.run_adb_command.return_value = ("", "", 0)
         mock_command_runner.return_value = mock_runner
-        
+
         transfer = ADBFileTransfer()
         result = transfer.pull_file("/sdcard/test.txt", "/local/test.txt")
-        
+
         assert result is True
-        expected_local_path = os.path.normpath('/local/test.txt')
+        # sanitize_local_path converts to absolute path, so we need to match that
+        expected_local_path = os.path.abspath(os.path.normpath('/local/test.txt'))
         mock_runner.run_adb_command.assert_called_with(['pull', '/sdcard/test.txt', expected_local_path])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
@@ -89,12 +90,13 @@ class TestADBFileTransfer:
         mock_runner = MagicMock()
         mock_runner.run_adb_command.return_value = ("", "", 0)
         mock_command_runner.return_value = mock_runner
-        
+
         transfer = ADBFileTransfer()
         result = transfer.push_file("/local/test.txt", "/sdcard/test.txt")
-        
+
         assert result is True
-        expected_local_path = os.path.normpath('/local/test.txt')
+        # sanitize_local_path converts to absolute path
+        expected_local_path = os.path.abspath(os.path.normpath('/local/test.txt'))
         mock_runner.run_adb_command.assert_called_with(['push', expected_local_path, '/sdcard/test.txt'])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
@@ -137,12 +139,13 @@ class TestADBFileTransfer:
         mock_runner = MagicMock()
         mock_runner.run_adb_command.return_value = ("", "", 0)
         mock_command_runner.return_value = mock_runner
-        
+
         transfer = ADBFileTransfer()
         result = transfer.pull_folder("/sdcard/Documents", "/local/Documents")
-        
+
         assert result is True
-        expected_local_path = os.path.normpath('/local/Documents')
+        # sanitize_local_path converts to absolute path
+        expected_local_path = os.path.abspath(os.path.normpath('/local/Documents'))
         mock_runner.run_adb_command.assert_called_with(['pull', '/sdcard/Documents', expected_local_path])
     
     @patch('src.core.file_transfer.ADBCommandRunner')
@@ -169,12 +172,13 @@ class TestADBFileTransfer:
         mock_runner = MagicMock()
         mock_runner.run_adb_command.return_value = ("", "", 0)
         mock_command_runner.return_value = mock_runner
-        
+
         transfer = ADBFileTransfer()
         result = transfer.push_folder("/local/Documents", "/sdcard/Documents")
-        
+
         assert result is True
-        expected_local_path = os.path.normpath('/local/Documents')
+        # sanitize_local_path converts to absolute path
+        expected_local_path = os.path.abspath(os.path.normpath('/local/Documents'))
         mock_runner.run_adb_command.assert_called_with(['push', expected_local_path, '/sdcard/Documents'])
     
     @patch('src.core.file_transfer.ADBCommandRunner')

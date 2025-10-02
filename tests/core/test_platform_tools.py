@@ -74,18 +74,29 @@ class TestPlatformTools(unittest.TestCase):
                         with patch('os.listdir', return_value=['platform-tools']):  # Mock directory listing
                             with patch('requests.get') as mock_get:
                                 with patch('builtins.open', mock_open()):
-                                    with patch('zipfile.ZipFile') as mock_zip:
-                                        with patch('shutil.move'):
-                                            with patch('os.chmod'):
-                                                with patch('os.symlink'):
-                                                    with patch('shutil.rmtree'):
-                                                        mock_response = Mock()
-                                                        mock_response.iter_content.return_value = [b'content']
-                                                        mock_response.raise_for_status.return_value = None
-                                                        mock_get.return_value = mock_response
-                                                        
-                                                        result = ensure_platform_tools_in_user_dir()
-                                                        assert result is not None
+                                    with patch('zipfile.is_zipfile', return_value=True):
+                                        with patch('zipfile.ZipFile') as mock_zip:
+                                            # Mock zip file entries
+                                            mock_info = Mock()
+                                            mock_info.filename = 'platform-tools/adb'
+                                            mock_info.file_size = 1000
+                                            mock_zip_instance = MagicMock()
+                                            mock_zip_instance.infolist.return_value = [mock_info]
+                                            mock_zip.return_value.__enter__.return_value = mock_zip_instance
+
+                                            with patch('shutil.move'):
+                                                with patch('os.chmod'):
+                                                    with patch('os.symlink'):
+                                                        with patch('shutil.rmtree'):
+                                                            mock_response = Mock()
+                                                            mock_response.iter_content.return_value = [b'content']
+                                                            mock_response.raise_for_status.return_value = None
+                                                            mock_response.url = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
+                                                            mock_response.headers = {'Content-Type': 'application/zip'}
+                                                            mock_get.return_value = mock_response
+
+                                                            result = ensure_platform_tools_in_user_dir()
+                                                            assert result is not None
 
     def test_download_and_extract_adb_linux(self):
         """Test ADB download and extraction on Linux."""

@@ -14,6 +14,11 @@ from .progress_tracker import ProgressTracker, TransferProgressEstimator
 from .platform_tools import get_adb_binary_path
 from .platform_utils import is_windows
 
+try:
+    from ..utils.security_utils import sanitize_android_path, sanitize_local_path
+except ImportError:
+    from utils.security_utils import sanitize_android_path, sanitize_local_path
+
 
 class ADBFileTransfer(ProgressTracker):
     """Handles ADB file transfer operations with progress tracking."""
@@ -58,14 +63,21 @@ class ADBFileTransfer(ProgressTracker):
     
     def pull_file(self, remote_file_path: str, local_file_path: str) -> bool:
         """Pull a single file from Android device to local machine."""
-        # Simple execution path using ADBCommandRunner for tests
-        local_file_path = os.path.normpath(local_file_path)
-        remote_file_path = remote_file_path.strip()
+        # Sanitize paths to prevent injection and traversal
+        try:
+            sanitized_remote = sanitize_android_path(remote_file_path.strip())
+            # Note: We use sanitize_local_path without base_dir to allow user flexibility
+            # but normalize to prevent basic traversal
+            sanitized_local = sanitize_local_path(local_file_path)
+        except ValueError as e:
+            self.update_status(f"Invalid path: {e}")
+            return False
+
         # If target already exists, do nothing
-        if os.path.exists(local_file_path):
+        if os.path.exists(sanitized_local):
             return False
         # Ensure local directory exists
-        local_dir = os.path.dirname(local_file_path)
+        local_dir = os.path.dirname(sanitized_local)
         if local_dir:
             try:
                 os.makedirs(local_dir, exist_ok=True)
@@ -74,43 +86,59 @@ class ADBFileTransfer(ProgressTracker):
                 self.update_status(f"Failed to create local directory: {e}")
                 pass
 
-        result = self.runner.run_adb_command(['pull', remote_file_path, local_file_path])
+        result = self.runner.run_adb_command(['pull', sanitized_remote, sanitized_local])
         return self._is_command_success(result)
     
     def push_file(self, local_file_path: str, remote_file_path: str) -> bool:
         """Push a single file from local machine to Android device."""
-        # Simple execution path using ADBCommandRunner for tests
-        local_file_path = os.path.normpath(local_file_path)
-        remote_file_path = remote_file_path.strip()
-        if not os.path.exists(local_file_path) or not os.path.isfile(local_file_path):
+        # Sanitize paths to prevent injection and traversal
+        try:
+            sanitized_local = sanitize_local_path(local_file_path)
+            sanitized_remote = sanitize_android_path(remote_file_path.strip())
+        except ValueError as e:
+            self.update_status(f"Invalid path: {e}")
             return False
 
-        result = self.runner.run_adb_command(['push', local_file_path, remote_file_path])
+        if not os.path.exists(sanitized_local) or not os.path.isfile(sanitized_local):
+            return False
+
+        result = self.runner.run_adb_command(['push', sanitized_local, sanitized_remote])
         return self._is_command_success(result)
     
     def pull_folder(self, remote_path: str, local_path: str) -> bool:
         """Pull files from Android device to local machine."""
-        # Simple execution path using ADBCommandRunner for tests
-        local_path = os.path.normpath(local_path)
-        remote_path = remote_path.strip()
+        # Sanitize paths to prevent injection and traversal
+        try:
+            sanitized_remote = sanitize_android_path(remote_path.strip())
+            sanitized_local = sanitize_local_path(local_path)
+        except ValueError as e:
+            self.update_status(f"Invalid path: {e}")
+            return False
+
         # If target folder already exists, do nothing
-        if os.path.exists(local_path):
+        if os.path.exists(sanitized_local):
             return False
         try:
-            os.makedirs(local_path, exist_ok=True)
+            os.makedirs(sanitized_local, exist_ok=True)
         except Exception:
             # Ignore directory creation failures for test environment
             pass
-        result = self.runner.run_adb_command(['pull', remote_path, local_path])
+        result = self.runner.run_adb_command(['pull', sanitized_remote, sanitized_local])
         return self._is_command_success(result)
     
     def push_folder(self, local_path: str, remote_path: str) -> bool:
         """Push files from local machine to Android device."""
-        local_path = os.path.normpath(local_path)
-        remote_path = remote_path.strip()
-        if not os.path.exists(local_path) or not os.path.isdir(local_path):
+        # Sanitize paths to prevent injection and traversal
+        try:
+            sanitized_local = sanitize_local_path(local_path)
+            sanitized_remote = sanitize_android_path(remote_path.strip())
+        except ValueError as e:
+            self.update_status(f"Invalid path: {e}")
             return False
-        result = self.runner.run_adb_command(['push', local_path, remote_path])
+
+        if not os.path.exists(sanitized_local) or not os.path.isdir(sanitized_local):
+            return False
+        result = self.runner.run_adb_command(['push', sanitized_local, sanitized_remote])
         return self._is_command_success(result)
     
     def _execute_transfer_command(self, cmd: list, operation_name: str) -> bool:
