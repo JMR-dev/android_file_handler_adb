@@ -40,6 +40,11 @@ class TestSanitizePathComponent:
         with pytest.raises(ValueError, match="dangerous character"):
             sanitize_path_component("file${USER}.txt")
 
+    def test_null_byte(self):
+        """Test that null bytes are rejected."""
+        with pytest.raises(ValueError, match="null byte"):
+            sanitize_path_component("file\x00name.txt")
+
 
 class TestSanitizeAndroidPath:
     """Tests for sanitize_android_path function."""
@@ -178,3 +183,152 @@ class TestSecurityIntegration:
         base = "/tmp/restricted"
         with pytest.raises(ValueError):
             sanitize_local_path("/etc/passwd", base_dir=base)
+
+    def test_symlink_attack_prevention(self):
+        """Test that symlink-based path traversal is blocked."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a base directory
+            base_dir = os.path.join(tmpdir, "safe")
+            os.makedirs(base_dir)
+
+            # Create a directory outside the base
+            outside_dir = os.path.join(tmpdir, "outside")
+            os.makedirs(outside_dir)
+
+            # Create a symlink inside the base that points outside
+            symlink_path = os.path.join(base_dir, "escape")
+            os.symlink(outside_dir, symlink_path)
+
+            # Attempt to use the symlink should fail base_dir validation
+            with pytest.raises(ValueError, match="outside base directory"):
+                sanitize_local_path(symlink_path, base_dir=base_dir)
+
+
+class TestUnicodeAndEdgeCases:
+    """Tests for Unicode characters, long paths, and cross-platform handling."""
+
+    def test_unicode_characters_in_android_path(self):
+        """Test that Unicode characters are accepted in Android paths."""
+        # Common Unicode characters in filenames
+        unicode_paths = [
+            "/sdcard/照片/vacation.jpg",  # Chinese
+            "/sdcard/Фото/image.png",  # Russian
+            "/sdcard/صور/photo.jpg",  # Arabic
+            "/sdcard/🎉/emoji.txt",  # Emoji
+            "/sdcard/Ménü/file.txt",  # Accented characters
+        ]
+        for path in unicode_paths:
+            result = sanitize_android_path(path)
+            assert result == path
+
+    def test_unicode_characters_in_path_component(self):
+        """Test that Unicode characters are accepted in path components."""
+        unicode_components = [
+            "文件.txt",  # Chinese
+            "файл.doc",  # Russian
+            "ملف.pdf",  # Arabic
+            "archivo_español.txt",  # Spanish
+        ]
+        for component in unicode_components:
+            result = sanitize_path_component(component)
+            assert result == component
+
+    def test_very_long_android_path(self):
+        """Test that very long paths are handled correctly."""
+        # Create a path with many nested directories
+        long_path = "/sdcard/" + "/".join([f"dir{i}" for i in range(100)]) + "/file.txt"
+        result = sanitize_android_path(long_path)
+        assert result == long_path
+
+    def test_very_long_path_component(self):
+        """Test that very long path components are accepted."""
+        # Android typically supports filenames up to 255 characters
+        long_component = "a" * 255
+        result = sanitize_path_component(long_component)
+        assert result == long_component
+
+    def test_extremely_long_path_component(self):
+        """Test that extremely long path components are accepted."""
+        # Test a 1000 character filename
+        very_long_component = "x" * 1000
+        result = sanitize_path_component(very_long_component)
+        assert result == very_long_component
+
+    def test_local_path_windows_style(self):
+        """Test that Windows-style paths are normalized correctly."""
+        import platform
+        if platform.system() == "Windows":
+            # Windows paths should be normalized
+            result = sanitize_local_path("C:\\Users\\Test\\Documents")
+            assert os.path.isabs(result)
+            assert "\\" in result or "/" in result  # May be normalized
+
+    def test_local_path_unix_style(self):
+        """Test that Unix-style paths are normalized correctly."""
+        result = sanitize_local_path("/tmp/test/file.txt")
+        assert os.path.isabs(result)
+
+    def test_local_path_with_mixed_separators(self):
+        """Test that paths with mixed separators are normalized."""
+        import platform
+        if platform.system() == "Windows":
+            # Windows should handle mixed separators
+            mixed_path = "C:/Users\\Test/Documents"
+            result = sanitize_local_path(mixed_path)
+            assert os.path.isabs(result)
+
+    def test_android_path_with_spaces_and_unicode(self):
+        """Test paths with both spaces and Unicode characters."""
+        path = "/sdcard/My Photos 照片/vacation 2023.jpg"
+        result = sanitize_android_path(path)
+        assert result == path
+
+    def test_device_id_with_port_number(self):
+        """Test device IDs with port numbers (emulators and network devices)."""
+        device_ids = [
+            "192.168.1.100:5555",
+            "10.0.2.15:5037",
+            "emulator-5554",
+            "emulator-5556",
+        ]
+        for device_id in device_ids:
+            result = validate_device_id(device_id)
+            assert result == device_id
+
+    def test_device_id_serial_numbers(self):
+        """Test various device serial number formats."""
+        device_ids = [
+            "ABC123DEF456",
+            "ZX1G427QK9",
+            "R5CR40CPDXD",
+            "ce12160c1a2d0b1f01",
+        ]
+        for device_id in device_ids:
+            result = validate_device_id(device_id)
+            assert result == device_id
+
+    def test_path_component_with_dots(self):
+        """Test that legitimate dots in filenames are allowed."""
+        components = [
+            "file.name.with.dots.txt",
+            "archive.tar.gz",
+            ".hidden",
+            "..hidden_but_safe",  # Double dot NOT used for traversal
+        ]
+        for component in components:
+            result = sanitize_path_component(component)
+            assert result == component
+
+    def test_android_path_normalization_preserves_intent(self):
+        """Test that path normalization preserves the original intent."""
+        paths = [
+            "/sdcard/DCIM/Camera",
+            "/data/local/tmp",
+            "/storage/emulated/0/Download",
+            "./relative/path/file.txt",
+        ]
+        for path in paths:
+            result = sanitize_android_path(path)
+            # Should preserve the original path structure
+            assert result == path

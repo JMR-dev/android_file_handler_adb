@@ -23,14 +23,19 @@ def sanitize_path_component(component: str) -> str:
     if not component:
         raise ValueError("Path component cannot be empty")
 
-    # Check for dangerous characters that could be used for command injection
-    dangerous_chars = [';', '|', '&', '$', '`', '\n', '\r', '>', '<', '(', ')', '{', '}', '[', ']', '!']
-    for char in dangerous_chars:
-        if char in component:
-            raise ValueError(f"Path component contains dangerous character: {char}")
+    # Check for null bytes
+    if '\x00' in component:
+        raise ValueError("Path component contains null byte")
+
+    # Check for dangerous characters using optimized regex
+    # Matches any shell metacharacters that could be used for command injection
+    dangerous_pattern = r'[;|&$`\n\r><(){}[\]!]'
+    match = re.search(dangerous_pattern, component)
+    if match:
+        raise ValueError(f"Path component contains dangerous character: {match.group()}")
 
     # Check for command substitution patterns
-    if '$(' in component or '${' in component or '`' in component:
+    if '$(' in component or '${' in component:
         raise ValueError("Path component contains command substitution pattern")
 
     return component
@@ -58,17 +63,15 @@ def sanitize_android_path(path: str) -> str:
     if '\x00' in path:
         raise ValueError("Path contains null byte")
 
-    # Check for command injection patterns
+    # Check for command injection patterns using optimized regex
     # Note: We check for shell metacharacters that could be used for command injection
     # We allow spaces and most characters that are valid in Android paths
-    dangerous_patterns = [
-        ';', '|', '&', '$(', '${', '`', '\n', '\r',
-        '&&', '||', '>>',
-    ]
-
-    for pattern in dangerous_patterns:
-        if pattern in path:
-            raise ValueError(f"Path contains dangerous pattern: {pattern}")
+    # Pattern matches: semicolon, pipe, ampersand, dollar-paren, dollar-brace,
+    # backtick, newline, carriage return, double-ampersand, double-pipe, double-redirect
+    dangerous_pattern = r'[;|&`\n\r]|\$[({]|&&|\|\||>>'
+    match = re.search(dangerous_pattern, path)
+    if match:
+        raise ValueError(f"Path contains dangerous pattern: {match.group()}")
 
     # Note: We allow spaces, Unicode characters, and other characters that are
     # valid in Android filesystem paths. The dangerous pattern check above is
@@ -103,7 +106,7 @@ def sanitize_local_path(path: str, base_dir: Optional[str] = None) -> str:
 
     # Normalize the path to resolve .. and symlinks
     try:
-        normalized_path = os.path.normpath(os.path.abspath(path))
+        normalized_path = os.path.normpath(os.path.realpath(path))
     except (ValueError, OSError) as e:
         raise ValueError(f"Invalid path: {e}")
 
@@ -112,7 +115,7 @@ def sanitize_local_path(path: str, base_dir: Optional[str] = None) -> str:
     # with base_dir, it's outside the allowed directory tree
     if base_dir:
         try:
-            base_dir_abs = os.path.normpath(os.path.abspath(base_dir))
+            base_dir_abs = os.path.normpath(os.path.realpath(base_dir))
             # Check if the normalized path starts with the base directory
             if not normalized_path.startswith(base_dir_abs + os.sep) and normalized_path != base_dir_abs:
                 raise ValueError(f"Path traversal detected: path is outside base directory")
