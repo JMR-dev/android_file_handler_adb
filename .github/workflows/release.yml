@@ -259,7 +259,7 @@ jobs:
           fi
 
           fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
-            --architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
+            --architecture amd64 --deb-user root --deb-group root \
             --after-install scripts/debian_postinst.sh \
             -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
@@ -339,7 +339,7 @@ jobs:
           fi
 
           fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-            --architecture x86_64 --prefix /usr/bin \
+            --architecture x86_64 \
             -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload Arch package
