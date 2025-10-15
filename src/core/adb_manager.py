@@ -154,6 +154,8 @@ class ADBManager:
                 f"Security: Path rejected in list_files() - "
                 f"path='{path[:100]}', reason: {str(e)}"
             )
+            # Notify user via status callback
+            self._update_status(f"Invalid path: {str(e)}")
             return []
 
         device_args = []
@@ -167,6 +169,8 @@ class ADBManager:
                     f"Security: Device ID rejected in list_files() - "
                     f"device_id='{target_device}', reason: {str(e)}"
                 )
+                # Notify user via status callback
+                self._update_status(f"Invalid device ID: {str(e)}")
                 return []
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
@@ -419,6 +423,8 @@ class ADBManager:
                 f"Security: Path rejected in get_file_info() - "
                 f"path='{remote_path[:100]}', reason: {str(e)}"
             )
+            # Notify user via status callback
+            self._update_status(f"Invalid path: {str(e)}")
             return None
 
         device_args = []
@@ -432,6 +438,8 @@ class ADBManager:
                     f"Security: Device ID rejected in get_file_info() - "
                     f"device_id='{target_device}', reason: {str(e)}"
                 )
+                # Notify user via status callback
+                self._update_status(f"Invalid device ID: {str(e)}")
                 return None
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
