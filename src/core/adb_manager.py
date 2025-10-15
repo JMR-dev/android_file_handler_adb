@@ -7,6 +7,7 @@ import os
 import sys
 import shutil
 import subprocess
+import logging
 from typing import Optional, Tuple, Callable
 
 # Import our modular components
@@ -33,6 +34,8 @@ except ImportError:
 
 
 OS_TYPE = sys.platform
+
+logger = logging.getLogger(__name__)
 
 
 class ADBManager:
@@ -146,7 +149,8 @@ class ADBManager:
         try:
             sanitized_path = sanitize_android_path(path)
         except ValueError as e:
-            # Return empty list if path is invalid
+            # Log validation error and return empty list
+            logger.warning(f"Invalid path rejected in list_files: {str(e)}")
             return []
 
         device_args = []
@@ -155,7 +159,8 @@ class ADBManager:
             try:
                 validated_device = validate_device_id(target_device)
                 device_args = ["-s", validated_device]
-            except ValueError:
+            except ValueError as e:
+                logger.warning(f"Invalid device ID rejected in list_files: {str(e)}")
                 return []
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
@@ -403,7 +408,8 @@ class ADBManager:
         # Sanitize inputs to prevent command injection
         try:
             sanitized_path = sanitize_android_path(remote_path)
-        except ValueError:
+        except ValueError as e:
+            logger.warning(f"Invalid path rejected in get_file_info: {str(e)}")
             return None
 
         device_args = []
@@ -412,7 +418,8 @@ class ADBManager:
             try:
                 validated_device = validate_device_id(target_device)
                 device_args = ["-s", validated_device]
-            except ValueError:
+            except ValueError as e:
+                logger.warning(f"Invalid device ID rejected in get_file_info: {str(e)}")
                 return None
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
