@@ -553,3 +553,67 @@ class TestADBManagerSecurityIntegration:
             result = manager.list_files(path)
             # Result will be empty list due to mocked command, but should not reject path
             assert isinstance(result, list)
+
+    def test_list_files_calls_status_callback_on_invalid_path(self):
+        """Test that list_files() notifies user via status callback on invalid path."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        # Set up status callback to capture messages
+        status_messages = []
+        manager.set_status_callback(lambda msg: status_messages.append(msg))
+
+        # Try invalid path
+        result = manager.list_files("/sdcard/test; rm -rf /")
+
+        assert result == []
+        assert len(status_messages) == 1
+        assert "Invalid path" in status_messages[0]
+        assert "dangerous pattern" in status_messages[0]
+
+    def test_list_files_calls_status_callback_on_invalid_device_id(self):
+        """Test that list_files() notifies user via status callback on invalid device ID."""
+        manager = ADBManager()
+
+        # Set up status callback to capture messages
+        status_messages = []
+        manager.set_status_callback(lambda msg: status_messages.append(msg))
+
+        # Try invalid device ID
+        result = manager.list_files("/sdcard/test", device_id="device; malicious")
+
+        assert result == []
+        assert len(status_messages) == 1
+        assert "Invalid device ID" in status_messages[0]
+
+    def test_get_file_info_calls_status_callback_on_invalid_path(self):
+        """Test that get_file_info() notifies user via status callback on invalid path."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        # Set up status callback to capture messages
+        status_messages = []
+        manager.set_status_callback(lambda msg: status_messages.append(msg))
+
+        # Try invalid path with null byte
+        result = manager.get_file_info("/sdcard/file\x00.txt")
+
+        assert result is None
+        assert len(status_messages) == 1
+        assert "Invalid path" in status_messages[0]
+        assert "null byte" in status_messages[0]
+
+    def test_status_callback_not_called_on_valid_input(self):
+        """Test that status callback is not called for valid inputs."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        # Set up status callback to capture messages
+        status_messages = []
+        manager.set_status_callback(lambda msg: status_messages.append(msg))
+
+        # Try valid path (will return empty due to mocked command, but shouldn't trigger callback)
+        result = manager.list_files("/sdcard/DCIM")
+
+        # No status messages for validation errors
+        assert not any("Invalid" in msg for msg in status_messages)
