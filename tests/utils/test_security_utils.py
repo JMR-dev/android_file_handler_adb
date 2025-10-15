@@ -138,6 +138,41 @@ class TestSanitizeLocalPath:
         result = sanitize_local_path("/tmp/test/../other")
         assert ".." not in result
 
+    def test_nonexistent_path_with_allow_nonexistent(self):
+        """Test that non-existent paths are allowed with allow_nonexistent=True."""
+        # This path likely doesn't exist
+        nonexistent = "/tmp/nonexistent_dir_12345/subdir/file.txt"
+        result = sanitize_local_path(nonexistent, allow_nonexistent=True)
+        # Should return absolute path even if it doesn't exist
+        assert os.path.isabs(result)
+        assert "nonexistent_dir_12345" in result
+
+    def test_existing_path_resolves_symlinks(self):
+        """Test that existing paths still resolve symlinks."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a real directory
+            real_dir = os.path.join(tmpdir, "real")
+            os.makedirs(real_dir)
+
+            # Create a symlink to it
+            link_path = os.path.join(tmpdir, "link")
+            os.symlink(real_dir, link_path)
+
+            # With allow_nonexistent=True, existing paths should still resolve symlinks
+            result = sanitize_local_path(link_path, allow_nonexistent=True)
+            # Result should be the real path, not the symlink
+            assert "real" in result
+            assert result == os.path.realpath(link_path)
+
+    def test_nonexistent_path_strict_mode(self):
+        """Test that strict mode (allow_nonexistent=False) works for existing paths."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Test with existing directory
+            result = sanitize_local_path(tmpdir, allow_nonexistent=False)
+            assert os.path.isabs(result)
+
 
 class TestValidateDeviceId:
     """Tests for validate_device_id function."""

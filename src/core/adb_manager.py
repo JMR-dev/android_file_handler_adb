@@ -149,8 +149,11 @@ class ADBManager:
         try:
             sanitized_path = sanitize_android_path(path)
         except ValueError as e:
-            # Log validation error and return empty list
-            logger.warning(f"Invalid path rejected in list_files: {str(e)}")
+            # Log detailed validation error
+            logger.warning(
+                f"Security: Path rejected in list_files() - "
+                f"path='{path[:100]}', reason: {str(e)}"
+            )
             return []
 
         device_args = []
@@ -160,7 +163,10 @@ class ADBManager:
                 validated_device = validate_device_id(target_device)
                 device_args = ["-s", validated_device]
             except ValueError as e:
-                logger.warning(f"Invalid device ID rejected in list_files: {str(e)}")
+                logger.warning(
+                    f"Security: Device ID rejected in list_files() - "
+                    f"device_id='{target_device}', reason: {str(e)}"
+                )
                 return []
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
@@ -409,7 +415,10 @@ class ADBManager:
         try:
             sanitized_path = sanitize_android_path(remote_path)
         except ValueError as e:
-            logger.warning(f"Invalid path rejected in get_file_info: {str(e)}")
+            logger.warning(
+                f"Security: Path rejected in get_file_info() - "
+                f"path='{remote_path[:100]}', reason: {str(e)}"
+            )
             return None
 
         device_args = []
@@ -419,7 +428,10 @@ class ADBManager:
                 validated_device = validate_device_id(target_device)
                 device_args = ["-s", validated_device]
             except ValueError as e:
-                logger.warning(f"Invalid device ID rejected in get_file_info: {str(e)}")
+                logger.warning(
+                    f"Security: Device ID rejected in get_file_info() - "
+                    f"device_id='{target_device}', reason: {str(e)}"
+                )
                 return None
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
