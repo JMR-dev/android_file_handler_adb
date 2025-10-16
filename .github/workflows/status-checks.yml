@@ -231,43 +231,48 @@ jobs:
       - name: Pull Docker image
         run: docker pull ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
 
-      - name: Run build inside container
+      - name: Build executable inside container
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             -e DISTRO_TYPE=${{ env.DISTRO_TYPE }} \
+            -e FPM_VERSION=${{ env.FPM_VERSION }} \
+            -e CI_CD=${{ env.CI_CD }} \
             ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
-            
+            sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
 
-
-      - name: Build executable
+      - name: Package pacman (fpm) inside container
         run: |
-          # Container has Poetry and all dependencies pre-installed
-          poetry install --no-interaction
-          poetry run python scripts/build_package_linux.py
-
-      - name: Package pacman (fpm)
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(poetry version -s)"
-          PKG_DIR="pkg_dist_arch"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
-
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-            --architecture x86_64 \
-            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e FPM_VERSION=${{ env.FPM_VERSION }} \
+            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
+            sh -c 'set -euo pipefail && \
+            VERSION="$(poetry version -s)" && \
+            PKG_DIR="pkg_dist_arch" && \
+            mkdir -p dist && \
+            echo "Packaging from $PKG_DIR" && \
+            ls -la "$PKG_DIR" || true && \
+            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png" && \
+            if [ -f "$ICON_PATH" ]; then \
+              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+                --architecture x86_64 \
+                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
+                -C "$PKG_DIR" \
+                "usr/bin/android-file-handler" \
+                "usr/share/applications/android-file-handler.desktop" \
+                "usr/share/icons/hicolor/256x256/apps/android-file-handler.png"; \
+            else \
+              echo "Note: icon not present, packaging without icon" && \
+              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+                --architecture x86_64 \
+                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
+                -C "$PKG_DIR" \
+                "usr/bin/android-file-handler" \
+                "usr/share/applications/android-file-handler.desktop"; \
+            fi'
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
