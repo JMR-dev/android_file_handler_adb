@@ -138,6 +138,6 @@ The project uses GitHub Actions for multi-platform builds (`.github/workflows/re
 ## Notes
 
 - **ADB Binaries**: Stored in `src/platform-tools/` - do not modify or delete unless explictly instructed to
-- **Python Version**: Requires Python 3.12 (< 3.13)
+- **Python Version**: Requires Python 3.13 (< 3.14)
 - **Package Mode**: Poetry is configured with `package-mode = false`
 - **License**: First-run license agreement required on Windows
