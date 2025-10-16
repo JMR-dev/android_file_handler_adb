@@ -238,9 +238,6 @@ jobs:
             -w /workspace \
             -e DISTRO_TYPE=${{ env.DISTRO_TYPE }} \
             ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
-            bash -c "
-              echo Running inside container
-              ls -la
             
 
 
