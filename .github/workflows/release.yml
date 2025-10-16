@@ -30,6 +30,12 @@ permissions:
   contents: write
   pull-requests: write
 
+# Prevent multiple release workflows from running simultaneously
+# This is critical to prevent concurrent rollbacks
+concurrency:
+  group: release-workflow
+  cancel-in-progress: false
+
 env:
   # change this if you prefer a different pinned fpm version
   FPM_VERSION: "1.16.0"
@@ -72,10 +78,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
@@ -190,13 +196,28 @@ jobs:
           echo "Monitoring PR #$PR_NUMBER for status checks..."
 
           MAX_WAIT=${{ github.event.inputs.pr_check_timeout || 1800 }}
-          SLEEP_INTERVAL=30
+          INITIAL_INTERVAL=10
+          MAX_INTERVAL=300  # 5 minutes maximum
+          BACKOFF_MULTIPLIER=1.5
+          SLEEP_INTERVAL=$INITIAL_INTERVAL
           ELAPSED=0
-          echo "Max wait time: ${MAX_WAIT}s"
+          RETRY_COUNT=0
+          MAX_RETRIES=3
+          echo "Max wait time: ${MAX_WAIT}s, using exponential backoff (max interval: ${MAX_INTERVAL}s)"
 
           while [ $ELAPSED -lt $MAX_WAIT ]; do
-            # Get PR status
-            PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' --repo ${{ github.repository }})
+            # Get PR status with retry logic
+            if ! PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' --repo ${{ github.repository }} 2>&1); then
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "::error::Failed to fetch PR status after $MAX_RETRIES retries"
+                exit 1
+              fi
+              echo "::warning::Failed to fetch PR status (attempt $RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** RETRY_COUNT))
+              continue
+            fi
+            RETRY_COUNT=0
 
             if [ "$PR_STATE" = "MERGED" ]; then
               echo "✓ PR #$PR_NUMBER has been merged successfully!"
@@ -208,8 +229,18 @@ jobs:
               exit 1
             fi
 
-            # Check status checks
-            STATUS_JSON=$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup' --repo ${{ github.repository }})
+            # Check status checks with retry logic
+            RETRY_COUNT=0
+            if ! STATUS_JSON=$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup' --repo ${{ github.repository }} 2>&1); then
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "::error::Failed to fetch status checks after $MAX_RETRIES retries"
+                exit 1
+              fi
+              echo "::warning::Failed to fetch status checks (attempt $RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** RETRY_COUNT))
+              continue
+            fi
 
             # Count check states
             TOTAL=$(echo "$STATUS_JSON" | jq 'length')
@@ -217,7 +248,7 @@ jobs:
             SUCCESS=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion == "SUCCESS" or .conclusion == "NEUTRAL" or .conclusion == "SKIPPED")] | length')
             FAILED=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT")] | length')
 
-            echo "Status checks: $COMPLETED/$TOTAL completed, $SUCCESS passed, $FAILED failed"
+            echo "Status checks: $COMPLETED/$TOTAL completed, $SUCCESS passed, $FAILED failed (interval: ${SLEEP_INTERVAL}s)"
 
             # Check for failures
             if [ "$FAILED" -gt 0 ]; then
@@ -229,6 +260,14 @@ jobs:
             echo "Waiting for checks to complete... (${ELAPSED}s elapsed)"
             sleep $SLEEP_INTERVAL
             ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+
+            # Calculate next interval with exponential backoff (capped at MAX_INTERVAL)
+            NEXT_INTERVAL=$(awk "BEGIN {printf \"%.0f\", $SLEEP_INTERVAL * $BACKOFF_MULTIPLIER}")
+            if [ $NEXT_INTERVAL -gt $MAX_INTERVAL ]; then
+              SLEEP_INTERVAL=$MAX_INTERVAL
+            else
+              SLEEP_INTERVAL=$NEXT_INTERVAL
+            fi
           done
 
           echo "::error::Timeout waiting for PR #$PR_NUMBER to merge"
@@ -239,6 +278,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # Ensure only one merge operation runs at a time
+    concurrency:
+      group: main-branch-merge
+      cancel-in-progress: false
     outputs:
       merge_commit_sha: ${{ steps.merge.outputs.merge_commit_sha }}
       previous_main_sha: ${{ steps.merge.outputs.previous_main_sha }}
@@ -309,6 +352,10 @@ jobs:
     permissions:
       contents: write
       actions: read
+    # Prevent multiple rollback operations from running concurrently
+    concurrency:
+      group: main-branch-verify-and-rollback
+      cancel-in-progress: false
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v4
@@ -451,8 +498,20 @@ jobs:
           }
           Write-Output "Found executable: $exePath"
 
-          # Sign with GPG
-          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$exePath"
+          # Create temporary file for passphrase
+          $passphraseFile = New-TemporaryFile
+          try {
+            "${{ secrets.GPG_PASSPHRASE }}" | Out-File -FilePath $passphraseFile -Encoding ASCII -NoNewline
+
+            # Sign with GPG using passphrase file
+            gpg --batch --yes --passphrase-file "$passphraseFile" --detach-sign --armor "$exePath"
+          }
+          finally {
+            # Clean up passphrase file
+            if (Test-Path $passphraseFile) {
+              Remove-Item $passphraseFile -Force
+            }
+          }
 
           # Generate SHA-256 hash
           $hash = (Get-FileHash -Path "$exePath" -Algorithm SHA256).Hash.ToLower()
@@ -481,7 +540,7 @@ jobs:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/jmr-dev/android-file-handler-debian-builder
+      image: ghcr.io/jmr-dev/android-file-handler-debian-builder:debian13-trixie
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -538,8 +597,18 @@ jobs:
           fi
           echo "Found package: $DEB_FILE"
 
-          # Sign with GPG
-          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$DEB_FILE"
+          # Create temporary file for passphrase
+          PASSPHRASE_FILE=$(mktemp)
+          trap "rm -f '$PASSPHRASE_FILE'" EXIT
+
+          # Write passphrase to temporary file
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$PASSPHRASE_FILE"
+
+          # Sign with GPG using passphrase file
+          gpg --batch --yes --passphrase-file "$PASSPHRASE_FILE" --detach-sign --armor "$DEB_FILE"
+
+          # Clean up passphrase file
+          rm -f "$PASSPHRASE_FILE"
 
           # Generate SHA-256 hash
           sha256sum "$DEB_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-debian.sha256
@@ -564,44 +633,64 @@ jobs:
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/jmr-dev/android-file-handler-arch-builder
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: main
 
-      - name: Build executable
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CI_CD_PAT }}
+
+      - name: Pull Docker image
+        run: docker pull ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
+
+      - name: Build executable inside container
         run: |
-          # Container has Poetry and all dependencies pre-installed
-          poetry install --no-interaction
-          poetry run python scripts/build_package_linux.py
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e DISTRO_TYPE=${{ env.DISTRO_TYPE }} \
+            -e FPM_VERSION=${{ env.FPM_VERSION }} \
+            -e CI_CD=${{ env.CI_CD }} \
+            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
+            sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
 
-      - name: Package pacman (fpm)
-        shell: bash
+      - name: Package pacman (fpm) inside container
         run: |
-          set -euo pipefail
-          VERSION="$(poetry version -s)"
-          PKG_DIR="pkg_dist_arch"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
-
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-            --architecture x86_64 \
-            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e FPM_VERSION=${{ env.FPM_VERSION }} \
+            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
+            sh -c 'set -euo pipefail && \
+            VERSION="$(poetry version -s)" && \
+            PKG_DIR="pkg_dist_arch" && \
+            mkdir -p dist && \
+            echo "Packaging from $PKG_DIR" && \
+            ls -la "$PKG_DIR" || true && \
+            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png" && \
+            if [ -f "$ICON_PATH" ]; then \
+              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+                --architecture x86_64 \
+                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
+                -C "$PKG_DIR" \
+                "usr/bin/android-file-handler" \
+                "usr/share/applications/android-file-handler.desktop" \
+                "usr/share/icons/hicolor/256x256/apps/android-file-handler.png"; \
+            else \
+              echo "Note: icon not present, packaging without icon" && \
+              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+                --architecture x86_64 \
+                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
+                -C "$PKG_DIR" \
+                "usr/bin/android-file-handler" \
+                "usr/share/applications/android-file-handler.desktop"; \
+            fi'
 
       - name: Import GPG key
         shell: bash
@@ -621,8 +710,18 @@ jobs:
           fi
           echo "Found package: $PKG_FILE"
 
-          # Sign with GPG
-          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$PKG_FILE"
+          # Create temporary file for passphrase
+          PASSPHRASE_FILE=$(mktemp)
+          trap "rm -f '$PASSPHRASE_FILE'" EXIT
+
+          # Write passphrase to temporary file
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$PASSPHRASE_FILE"
+
+          # Sign with GPG using passphrase file
+          gpg --batch --yes --passphrase-file "$PASSPHRASE_FILE" --detach-sign --armor "$PKG_FILE"
+
+          # Clean up passphrase file
+          rm -f "$PASSPHRASE_FILE"
 
           # Generate SHA-256 hash
           sha256sum "$PKG_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-arch.sha256
@@ -703,8 +802,18 @@ jobs:
           fi
           echo "Found package: $RPM_FILE"
 
-          # Sign with GPG
-          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$RPM_FILE"
+          # Create temporary file for passphrase
+          PASSPHRASE_FILE=$(mktemp)
+          trap "rm -f '$PASSPHRASE_FILE'" EXIT
+
+          # Write passphrase to temporary file
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$PASSPHRASE_FILE"
+
+          # Sign with GPG using passphrase file
+          gpg --batch --yes --passphrase-file "$PASSPHRASE_FILE" --detach-sign --armor "$RPM_FILE"
+
+          # Clean up passphrase file
+          rm -f "$PASSPHRASE_FILE"
 
           # Generate SHA-256 hash
           sha256sum "$RPM_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-rhel.sha256
