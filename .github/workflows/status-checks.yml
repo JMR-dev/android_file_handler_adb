@@ -18,6 +18,9 @@ env:
 jobs:
   run-unit-tests-debian:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ghcr.io/jmr-dev/android-file-handler-debian-builder
       credentials:
@@ -36,6 +39,9 @@ jobs:
 
   run-unit-tests-arch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ghcr.io/jmr-dev/android-file-handler-arch-builder
       credentials:
@@ -150,6 +156,9 @@ jobs:
 
   build-debian:
     needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel, run-unit-tests-windows]
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
@@ -201,6 +210,9 @@ jobs:
 
   build-arch:
     needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel, run-unit-tests-windows]
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
