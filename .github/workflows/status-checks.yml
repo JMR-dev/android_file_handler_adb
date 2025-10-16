@@ -16,22 +16,49 @@ env:
   CI_CD: true
 
 jobs:
-  run-unit-tests-linux:
+  run-unit-tests-debian:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/jmr-dev/android-file-handler-debian-builder
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
+      - name: Run tests
+        run: |
+          poetry run pytest tests/ -v
+
+  run-unit-tests-arch:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/jmr-dev/android-file-handler-arch-builder
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          poetry install
+          poetry install --no-interaction
+
+      - name: Run tests
+        run: |
+          poetry run pytest tests/ -v
+
+  run-unit-tests-rhel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction
 
       - name: Run tests
         run: |
@@ -70,7 +97,7 @@ jobs:
           poetry run pytest tests/ -v
 
   build-windows:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
+    needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel, run-unit-tests-windows]
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -113,65 +140,29 @@ jobs:
             dist/android-file-handler.exe
 
   build-debian:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
+    needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel, run-unit-tests-windows]
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
     container:
-      image: python:3.12-slim
+      image: ghcr.io/jmr-dev/android-file-handler-debian-builder
     steps:
-      - name: Install system dependencies & gem fpm (include Tcl/Tk)
-        run: |
-          set -euo pipefail
-          apt-get update
-          # Install Tcl/Tk runtimes, dev headers and common X libraries required by tkinter
-          apt-get install -y --no-install-recommends \
-            curl git build-essential ruby ruby-dev gcc make zlib1g-dev ca-certificates python3-tk \
-            tcl8.6 tk8.6 tcl8.6-dev tk8.6-dev libx11-6 libxext6 libxrender1 libxcb1
-          # install pinned fpm to the system gem dir (will be available under gem env's EXECUTABLE DIRECTORY or /usr/local/bin)
-          gem install --no-document -v "${FPM_VERSION}" fpm
-
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: latest
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-
-      - name: Configure Poetry
+      - name: Build executable
         run: |
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-
-      - name: Install dependencies & build executable
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry env use python3.12 || true
-          # Debug: show tkinter/_tkinter and Tcl library discovery in the Poetry venv
-          poetry run python -c 'import tkinter, _tkinter, sys; print("tkinter=", getattr(tkinter, "__file__", None)); print("_tkinter=", getattr(_tkinter, "__file__", None)); import tkinter as tk; print("TCL_LIBRARY=", tk.Tcl().eval("info library"))'
-
-          # Build distro-specific package layout using the build script via Poetry
+          # Container has Poetry and all dependencies pre-installed
+          poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
 
       - name: Package .deb (fpm)
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
           VERSION="$(poetry version -s)"
           PKG_DIR="pkg_dist_debian"
           mkdir -p dist
-          # Debug listing
           echo "Packaging from $PKG_DIR"
           ls -la "$PKG_DIR" || true
 
@@ -184,7 +175,7 @@ jobs:
           fi
 
           fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
-            --architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
+            --architecture amd64 --deb-user root --deb-group root \
             --after-install scripts/debian_postinst.sh \
             -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
@@ -197,55 +188,26 @@ jobs:
             pkg_dist_debian/**
 
   build-arch:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
+    needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel, run-unit-tests-windows]
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
     container:
-      image: archlinux:latest
+      image: ghcr.io/jmr-dev/android-file-handler-arch-builder
     steps:
-      - name: Install system dependencies (Arch) and system Ruby
-        run: |
-          set -euo pipefail
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm ruby base-devel curl git tar ca-certificates tk tcl libx11 libxext libxrender libxcb
-          # Install fpm system-wide and pin version so fpm will be in /usr/in
-          gem install --no-document erb
-          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/bin
-          # persist system bindir to subsequent steps (usually already on PATH)
-          echo "/usr/local/bin" >> $GITHUB_PATH
-
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: latest
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-
-      - name: Configure Poetry
+      - name: Build executable
         run: |
-          echo 'export PATH="$HOME/bin:$PATH"' >> $GITHUB_ENV
-          export PATH="$HOME/bin:$PATH"
-
-      - name: Install dependencies & build executable
-        run: |
-          export PATH="$HOME/bin:/usr/bin:$PATH"
-          # Use unified build script to produce pkg_dist_arch layout via Poetry
+          # Container has Poetry and all dependencies pre-installed
+          poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
 
       - name: Package pacman (fpm)
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:/usr/bin:$PATH"
           VERSION="$(poetry version -s)"
           PKG_DIR="pkg_dist_arch"
           mkdir -p dist
@@ -261,7 +223,7 @@ jobs:
           fi
 
           fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-            --architecture x86_64 --prefix /usr/bin \
+            --architecture x86_64 \
             -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload Arch package
@@ -273,7 +235,7 @@ jobs:
             pkg_dist_arch/**
 
   build-rhel:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
+    needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel, run-unit-tests-windows]
     permissions:
       contents: read
       packages: read
@@ -281,7 +243,7 @@ jobs:
       DISTRO_TYPE: rhel
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/jmr-dev/android-file-handler-adb:v0.1.0
+      image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -289,8 +251,7 @@ jobs:
       - name: Build RHEL package
         run: |
           set -euo pipefail
-          export CI_CD=true
-          export DISTRO_TYPE=rhel
+          # Container has Poetry and all dependencies pre-installed
           poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
 
