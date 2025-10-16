@@ -13,14 +13,16 @@ FROM archlinux:latest
 ARG FPM_VERSION=1.16.0
 
 # Install system dependencies (Arch) including Python build dependencies
-RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm \
+RUN pacman -Syu --noconfirm \
     ruby \
+    ruby-bundler \
+    ruby-rake \
     base-devel \
     curl \
     git \
     tar \
     ca-certificates \
+    ca-certificates-utils \
     tk \
     tcl \
     libx11 \
@@ -38,13 +40,25 @@ RUN pacman -Syu --noconfirm && \
     wget \
     xz \
     patch && \
+    update-ca-trust && \
     pacman -Scc --noconfirm
 
 # Install erb gem (required for fpm on Arch)
 RUN gem install --no-document erb
 
 # Install fpm system-wide and pin version so fpm will be in /usr/bin
-RUN gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/bin
+# Install fpm and print diagnostic info
+RUN set -euxo pipefail && \
+    echo "Ruby version:" && ruby -v && \
+    echo "Gem environment:" && gem env && \
+    echo "Attempting gem install fpm ${FPM_VERSION}" && \
+    gem install -V --no-document -v "${FPM_VERSION}" fpm || { echo "Gem install failed"; exit 1; } && \
+    echo "Gem bin dir: $(ruby -e 'puts Gem.bindir')" && \
+    ls -l "$(ruby -e 'puts Gem.bindir')" || true && \
+    cp -v "$(ruby -e 'puts Gem.bindir')"/* /usr/bin/ || true && \
+    fpm --version || echo "fpm missing"
+
+
 
 # Install pyenv
 ENV PYENV_ROOT="/root/.pyenv"
