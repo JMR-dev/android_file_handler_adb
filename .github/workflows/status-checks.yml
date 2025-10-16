@@ -22,7 +22,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/jmr-dev/android-file-handler-debian-builder
+      image: ghcr.io/jmr-dev/android-file-handler-debian-builder:debian13-trixie
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -43,7 +43,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/jmr-dev/android-file-handler-arch-builder
+      image: ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -217,7 +217,7 @@ jobs:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/jmr-dev/android-file-handler-arch-builder
+      image: ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
