@@ -133,10 +133,11 @@ The project uses GitHub Actions for multi-platform builds (`.github/workflows/re
 - Do not recreate deleted files
 - Do not change user-facing text unless asked
 - Always run the application to test if it will run and have it run successfully before declaring an iteration complete
+- Never use the squash merge strategy unless specifically instructed to do so
 
 ## Notes
 
-- **ADB Binaries**: Stored in `src/platform-tools/` - do not modify or delete
+- **ADB Binaries**: Stored in `src/platform-tools/` - do not modify or delete unless explictly instructed to
 - **Python Version**: Requires Python 3.12 (< 3.13)
 - **Package Mode**: Poetry is configured with `package-mode = false`
 - **License**: First-run license agreement required on Windows

@@ -164,8 +164,8 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "Created PR #$PR_NUMBER: $PR_URL"
 
-          # Enable auto-merge (squash)
-          if ! gh pr merge "$PR_NUMBER" --auto --squash --repo ${{ github.repository }}; then
+          # Enable auto-merge (rebase)
+          if ! gh pr merge "$PR_NUMBER" --auto --rebase --repo ${{ github.repository }}; then
             echo "::error::Failed to enable auto-merge for PR #$PR_NUMBER"
             exit 1
           fi
@@ -341,13 +341,13 @@ jobs:
 
             echo "Commit status: state=$STATE, checks=$TOTAL_COUNT (${ELAPSED}s elapsed)"
 
-            if [ "$STATE" = "success" ]; then
+            if [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
+            echo "::error::Status checks failed on commit $MERGE_COMMIT"
+            gh api "repos/${{ github.repository }}/commits/${MERGE_COMMIT}/status" --jq '.statuses[] | select(.state == "failure" or .state == "error") | "- " + .context + ": " + .state'
+            exit 1
+            elif [ "$STATE" = "success" ]; then
               echo "✓ All status checks passed on main branch"
               exit 0
-            elif [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
-              echo "::error::Status checks failed on commit $MERGE_COMMIT"
-              gh api "repos/${{ github.repository }}/commits/${MERGE_COMMIT}/status" --jq '.statuses[] | select(.state == "failure" or .state == "error") | "- " + .context + ": " + .state'
-              exit 1
             fi
 
             sleep $SLEEP_INTERVAL
@@ -356,12 +356,12 @@ jobs:
 
           # If we get here, treat as success if no checks were registered
           if [ "$TOTAL_COUNT" -eq 0 ]; then
-            echo "⚠ No status checks found for commit, proceeding..."
-            exit 0
+            echo "⚠ No status checks found for commit. Investigate."
+            exit 1
           fi
 
-          echo "::warning::Status checks still pending after ${MAX_WAIT}s, proceeding with caution..."
-          exit 0
+          echo "::warning::Status checks still pending after ${MAX_WAIT}s, ending workflow. Investigate status checks"
+          exit 1
 
       - name: Handle status check failures with rollback
         if: failure() && steps.check-status.outcome == 'failure'
