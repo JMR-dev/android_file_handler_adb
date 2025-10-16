@@ -474,6 +474,9 @@ jobs:
   build-debian:
     needs: [verify-main-status-checks]
     if: ${{ contains(github.event.inputs.jobs, 'build-debian') }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
@@ -555,6 +558,9 @@ jobs:
   build-arch:
     needs: [verify-main-status-checks]
     if: ${{ contains(github.event.inputs.jobs, 'build-arch') }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
