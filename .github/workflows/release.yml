@@ -434,13 +434,42 @@ jobs:
           # Use the Windows spec file so packaging is consistent and reproducible
           poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 
+      - name: Import GPG key
+        shell: pwsh
+        run: |
+          $env:GPG_TTY = "not a tty"
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Windows executable
+        shell: pwsh
+        run: |
+          $exePath = Get-ChildItem -Path dist -Filter "android-file-handler.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exePath) {
+            Write-Error "Executable not found"
+            exit 1
+          }
+          Write-Output "Found executable: $exePath"
+
+          # Sign with GPG
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$exePath"
+
+          # Generate SHA-256 hash
+          $hash = (Get-FileHash -Path "$exePath" -Algorithm SHA256).Hash.ToLower()
+          $hashFile = "dist/android-file-handler-windows.sha256"
+          "$hash  $(Split-Path -Leaf $exePath)" | Out-File -FilePath $hashFile -Encoding ASCII -NoNewline
+          Write-Output "SHA-256: $hash"
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
           path: |
             dist/**/android-file-handler*.exe
+            dist/**/android-file-handler*.exe.asc
             dist/android-file-handler.exe
+            dist/android-file-handler.exe.asc
+            dist/android-file-handler-windows.sha256
        
   build-debian:
     needs: [verify-main-status-checks]
@@ -450,6 +479,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-debian-builder
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -485,12 +517,39 @@ jobs:
             --after-install scripts/debian_postinst.sh \
             -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
+      - name: Import GPG key
+        shell: bash
+        run: |
+          export GPG_TTY=$(tty) || true
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Debian package
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB_FILE=$(find dist -name "android-file-handler_*.deb" -type f | head -n 1)
+          if [ -z "$DEB_FILE" ]; then
+            echo "Error: .deb file not found"
+            exit 1
+          fi
+          echo "Found package: $DEB_FILE"
+
+          # Sign with GPG
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$DEB_FILE"
+
+          # Generate SHA-256 hash
+          sha256sum "$DEB_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-debian.sha256
+          echo "SHA-256: $(cat dist/android-file-handler-debian.sha256)"
+
       - name: Upload Debian .deb
         uses: actions/upload-artifact@v4
         with:
           name: debian-package
           path: |
             dist/android-file-handler_*.deb
+            dist/android-file-handler_*.deb.asc
+            dist/android-file-handler-debian.sha256
             pkg_dist_debian/**
 
   build-arch:
@@ -501,6 +560,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-arch-builder
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -535,12 +597,38 @@ jobs:
             --architecture x86_64 \
             -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
+      - name: Import GPG key
+        shell: bash
+        run: |
+          export GPG_TTY=$(tty) || true
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Arch package
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG_FILE=$(find dist -name "android-file-handler-*.pkg.tar.zst" -type f | head -n 1)
+          if [ -z "$PKG_FILE" ]; then
+            echo "Error: .pkg.tar.zst file not found"
+            exit 1
+          fi
+          echo "Found package: $PKG_FILE"
+
+          # Sign with GPG
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$PKG_FILE"
+
+          # Generate SHA-256 hash
+          sha256sum "$PKG_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-arch.sha256
+          echo "SHA-256: $(cat dist/android-file-handler-arch.sha256)"
+
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
         with:
           name: arch-package
           path: |
             dist/*.pkg.tar.*
+            dist/android-file-handler-arch.sha256
             pkg_dist_arch/**
 
 
@@ -555,6 +643,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -588,12 +679,39 @@ jobs:
 
           fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p "dist/android-file-handler-${VERSION}.x86_64.rpm" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
+      - name: Import GPG key
+        shell: bash
+        run: |
+          export GPG_TTY=$(tty) || true
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash RHEL package
+        shell: bash
+        run: |
+          set -euo pipefail
+          RPM_FILE=$(find dist -name "android-file-handler-*.rpm" -type f | head -n 1)
+          if [ -z "$RPM_FILE" ]; then
+            echo "Error: .rpm file not found"
+            exit 1
+          fi
+          echo "Found package: $RPM_FILE"
+
+          # Sign with GPG
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor "$RPM_FILE"
+
+          # Generate SHA-256 hash
+          sha256sum "$RPM_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-rhel.sha256
+          echo "SHA-256: $(cat dist/android-file-handler-rhel.sha256)"
+
       - name: Upload RHEL artifacts
         uses: actions/upload-artifact@v4
         with:
           name: rhel-package
           path: |
             dist/*.rpm
+            dist/*.rpm.asc
+            dist/android-file-handler-rhel.sha256
             pkg_dist_rhel/**
 
 
@@ -624,10 +742,18 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p ./release-files
+          # Copy binary packages
           find ./binaries -name "*.exe" -exec cp {} ./release-files/ \; || true
           find ./binaries -name "*.deb" -exec cp {} ./release-files/ \; || true
           find ./binaries -name "*.rpm" -exec cp {} ./release-files/ \; || true
           find ./binaries -name "*.pkg.tar.*" -exec cp {} ./release-files/ \; || true
+          # Copy GPG signatures
+          find ./binaries -name "*.asc" -exec cp {} ./release-files/ \; || true
+          # Copy SHA-256 hashes
+          find ./binaries -name "*.sha256" -exec cp {} ./release-files/ \; || true
+
+          echo "Release files prepared:"
+          ls -lh ./release-files/
         
       - name: Create Release
         uses: softprops/action-gh-release@v1
