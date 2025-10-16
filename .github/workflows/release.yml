@@ -144,7 +144,7 @@ jobs:
       - name: Create PR to develop
         id: create-pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CI_CD_PAT }}
         run: |
           set -e
           VERSION="${{ github.event.inputs.new_version }}"
