@@ -15,7 +15,7 @@ class DistroType(Enum):
     RHEL = "rhel"
 
 
-def run_command(cmd: list[str], check: bool = True, working_dir: str = None) -> subprocess.CompletedProcess:
+def run_command(cmd: list[str], check: bool = True, working_dir: str | None = None) -> subprocess.CompletedProcess:
     """Run command and handle errors."""
     print(f"Running: {' '.join(cmd)}")
     try:
@@ -172,7 +172,7 @@ StartupNotify=true
             print(f"   (missing) {item_path}")
 
 
-def main():
+def main() -> None:
     # Get project root (parent of scripts directory)
     project_root = Path(__file__).parent.parent.resolve()
     print(f"Project root: {project_root}")
