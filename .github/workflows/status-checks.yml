@@ -218,14 +218,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
-      options: --pull always
       credentials:
         username: ${{ github.actor }}
-        password: ${{ secrets.CI_CD_PAT }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Authenticate to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
       - name: Checkout code
         uses: actions/checkout@v4
 
