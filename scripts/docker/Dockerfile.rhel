@@ -10,7 +10,8 @@ FROM fedora:42
 # Set build argument for fpm version (can be overridden at build time)
 ARG FPM_VERSION=1.16.0
 
-# Install system dependencies
+# Install system dependencies including tk8-devel for Python tkinter support
+# Using tk8 (version 8.6) instead of tk (version 9.0) for Python 3.12 compatibility
 RUN dnf -y update && \
     dnf -y install \
     gcc \
@@ -33,7 +34,12 @@ RUN dnf -y update && \
     gcc-c++ \
     patch \
     which \
-    xz-devel && \
+    xz-devel \
+    tk-devel \
+    tcl-devel \
+    libX11-devel \
+    libXext-devel \
+    libXrender-devel && \
     dnf clean all
 
 # Install pyenv
@@ -42,14 +48,22 @@ ENV PATH="$PYENV_ROOT/bin:$PATH"
 
 RUN git clone https://github.com/pyenv/pyenv.git /root/.pyenv
 
-# Install Python 3.12 via pyenv
+# Install Python 3.12 via pyenv with tkinter support
+# The tk8-devel package must be installed before this step for _tkinter to be compiled
 RUN eval "$(pyenv init -)" && \
-    pyenv install 3.12.0 && \
-    pyenv global 3.12.0 && \
+    LDFLAGS="-L/usr/lib64" \
+    CPPFLAGS="-I/usr/include" \
+    PYTHON_CONFIGURE_OPTS="--enable-shared" \
+    pyenv install 3.13 && \
+    pyenv global 3.13 && \
     pyenv rehash
 
 # Update PATH to include pyenv shims
 ENV PATH="/root/.pyenv/shims:$PATH"
+
+# Verify Python has tkinter support
+RUN python3 -c "import tkinter; import _tkinter; print('tkinter support verified')" || \
+    (echo "ERROR: Python was built without tkinter support" && exit 1)
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 - --yes
