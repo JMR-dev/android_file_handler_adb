@@ -46,17 +46,13 @@ RUN pacman -Syu --noconfirm \
 # Install erb gem (required for fpm on Arch)
 RUN gem install --no-document erb
 
-# Install fpm system-wide and pin version so fpm will be in /usr/bin
-# Install fpm and print diagnostic info
-RUN set -euxo pipefail && \
-    echo "Ruby version:" && ruby -v && \
-    echo "Gem environment:" && gem env && \
-    echo "Attempting gem install fpm ${FPM_VERSION}" && \
-    gem install -V --no-document -v "${FPM_VERSION}" fpm || { echo "Gem install failed"; exit 1; } && \
-    echo "Gem bin dir: $(ruby -e 'puts Gem.bindir')" && \
-    ls -l "$(ruby -e 'puts Gem.bindir')" || true && \
-    cp -v "$(ruby -e 'puts Gem.bindir')"/* /usr/bin/ || true && \
-    fpm --version || echo "fpm missing"
+# Install fpm and create symlink so it's accessible in PATH
+# Note: Gems install to user directory on Arch, so we use Gem.user_dir
+RUN gem install --no-document -v "${FPM_VERSION}" fpm && \
+    GEM_BIN_DIR=$(ruby -e 'puts Gem.user_dir')/bin && \
+    echo "Gem bin directory: ${GEM_BIN_DIR}" && \
+    ln -sf "${GEM_BIN_DIR}/fpm" /usr/local/bin/fpm && \
+    /usr/local/bin/fpm --version
 
 
 
