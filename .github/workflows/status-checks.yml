@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-debian-builder
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +38,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-arch-builder
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +59,9 @@ jobs:
       packages: read
     container:
       image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -146,6 +155,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-debian-builder
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -194,6 +206,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-arch-builder
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -244,6 +259,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
