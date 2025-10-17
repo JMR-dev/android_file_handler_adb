@@ -42,6 +42,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      
     container:
       image: ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
       credentials:

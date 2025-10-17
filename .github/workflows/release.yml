@@ -33,6 +33,10 @@ env:
 jobs:
 
   status-checks:
+    permissions:
+      contents: read
+      packages: read
+
     uses: ./.github/workflows/status-checks.yml
 
   build-windows:
