@@ -13,8 +13,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read 
+  packages: read
+
 
 # Prevent multiple release workflows from running simultaneously
 # This is critical to prevent concurrent rollbacks
