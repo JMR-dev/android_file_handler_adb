@@ -14,7 +14,7 @@ on:
     inputs:
       new_version:
         description: "New version to release (e.g., 0.2.0)"
-        required: true
+        required: false
         type: string
       pr_check_timeout:
         description: "Timeout in seconds for PR status checks (default: 1800)"
@@ -63,9 +63,15 @@ jobs:
     outputs:
       pr_number: ${{ steps.create-pr.outputs.pr_number }}
     steps:
-      - name: Validate version format
+      - name: Validate version input
         run: |
           VERSION="${{ github.event.inputs.new_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version number is required for the bump-version task"
+            echo "::error::Please provide a version number in the 'new_version' input field"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
           # Full semver regex supporting:
           # - Basic: 1.2.3
           # - Prerelease: 1.2.3-beta, 1.2.3-rc.1, 1.2.3-alpha.1.2
@@ -213,23 +219,24 @@ jobs:
           BACKOFF_MULTIPLIER=1.5
           SLEEP_INTERVAL=$INITIAL_INTERVAL
           ELAPSED=0
-          RETRY_COUNT=0
+          PR_STATE_RETRY_COUNT=0
+          STATUS_CHECK_RETRY_COUNT=0
           MAX_RETRIES=3
           echo "Max wait time: ${MAX_WAIT}s, using exponential backoff (max interval: ${MAX_INTERVAL}s)"
 
           while [ $ELAPSED -lt $MAX_WAIT ]; do
             # Get PR status with retry logic
             if ! PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' --repo ${{ github.repository }} 2>&1); then
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              PR_STATE_RETRY_COUNT=$((PR_STATE_RETRY_COUNT + 1))
+              if [ $PR_STATE_RETRY_COUNT -ge $MAX_RETRIES ]; then
                 echo "::error::Failed to fetch PR status after $MAX_RETRIES retries"
                 exit 1
               fi
-              echo "::warning::Failed to fetch PR status (attempt $RETRY_COUNT/$MAX_RETRIES), retrying..."
-              sleep $((2 ** RETRY_COUNT))
+              echo "::warning::Failed to fetch PR status (attempt $PR_STATE_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** PR_STATE_RETRY_COUNT))
               continue
             fi
-            RETRY_COUNT=0
+            PR_STATE_RETRY_COUNT=0
 
             if [ "$PR_STATE" = "MERGED" ]; then
               echo "✓ PR #$PR_NUMBER has been merged successfully!"
@@ -242,17 +249,17 @@ jobs:
             fi
 
             # Check status checks with retry logic
-            RETRY_COUNT=0
             if ! STATUS_JSON=$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup' --repo ${{ github.repository }} 2>&1); then
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              STATUS_CHECK_RETRY_COUNT=$((STATUS_CHECK_RETRY_COUNT + 1))
+              if [ $STATUS_CHECK_RETRY_COUNT -ge $MAX_RETRIES ]; then
                 echo "::error::Failed to fetch status checks after $MAX_RETRIES retries"
                 exit 1
               fi
-              echo "::warning::Failed to fetch status checks (attempt $RETRY_COUNT/$MAX_RETRIES), retrying..."
-              sleep $((2 ** RETRY_COUNT))
+              echo "::warning::Failed to fetch status checks (attempt $STATUS_CHECK_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** STATUS_CHECK_RETRY_COUNT))
               continue
             fi
+            STATUS_CHECK_RETRY_COUNT=0
 
             # Count check states
             TOTAL=$(echo "$STATUS_JSON" | jq 'length')
@@ -425,23 +432,24 @@ jobs:
           BACKOFF_MULTIPLIER=1.5
           SLEEP_INTERVAL=$INITIAL_INTERVAL
           ELAPSED=0
-          RETRY_COUNT=0
+          PR_STATE_RETRY_COUNT=0
+          STATUS_CHECK_RETRY_COUNT=0
           MAX_RETRIES=3
           echo "Max wait time: ${MAX_WAIT}s, using exponential backoff (max interval: ${MAX_INTERVAL}s)"
 
           while [ $ELAPSED -lt $MAX_WAIT ]; do
             # Get PR status with retry logic
             if ! PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' --repo ${{ github.repository }} 2>&1); then
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              PR_STATE_RETRY_COUNT=$((PR_STATE_RETRY_COUNT + 1))
+              if [ $PR_STATE_RETRY_COUNT -ge $MAX_RETRIES ]; then
                 echo "::error::Failed to fetch PR status after $MAX_RETRIES retries"
                 exit 1
               fi
-              echo "::warning::Failed to fetch PR status (attempt $RETRY_COUNT/$MAX_RETRIES), retrying..."
-              sleep $((2 ** RETRY_COUNT))
+              echo "::warning::Failed to fetch PR status (attempt $PR_STATE_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** PR_STATE_RETRY_COUNT))
               continue
             fi
-            RETRY_COUNT=0
+            PR_STATE_RETRY_COUNT=0
 
             if [ "$PR_STATE" = "MERGED" ]; then
               echo "✓ PR #$PR_NUMBER has been merged successfully!"
@@ -459,17 +467,17 @@ jobs:
             fi
 
             # Check status checks with retry logic
-            RETRY_COUNT=0
             if ! STATUS_JSON=$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup' --repo ${{ github.repository }} 2>&1); then
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              STATUS_CHECK_RETRY_COUNT=$((STATUS_CHECK_RETRY_COUNT + 1))
+              if [ $STATUS_CHECK_RETRY_COUNT -ge $MAX_RETRIES ]; then
                 echo "::error::Failed to fetch status checks after $MAX_RETRIES retries"
                 exit 1
               fi
-              echo "::warning::Failed to fetch status checks (attempt $RETRY_COUNT/$MAX_RETRIES), retrying..."
-              sleep $((2 ** RETRY_COUNT))
+              echo "::warning::Failed to fetch status checks (attempt $STATUS_CHECK_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** STATUS_CHECK_RETRY_COUNT))
               continue
             fi
+            STATUS_CHECK_RETRY_COUNT=0
 
             # Count check states
             TOTAL=$(echo "$STATUS_JSON" | jq 'length')
