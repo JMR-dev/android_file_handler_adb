@@ -1,6 +1,6 @@
 [project]
 name = "android_file_handler"
-version = "0.1.0"
+version = "0.1.1"
 description = "An Android file transfer util for Windows and Linux. MacOS support may be added later."
 authors = [
     { name = "Jason Ross", email = "51939451+JMR-dev@users.noreply.github.com" },
