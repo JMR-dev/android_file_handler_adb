@@ -414,8 +414,8 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "Created PR #$PR_NUMBER: $PR_URL"
 
-          # Enable auto-merge (merge commit to maintain history)
-          if ! gh pr merge "$PR_NUMBER" --auto --merge --repo ${{ github.repository }}; then
+          # Enable auto-merge (rebase for fast-forward)
+          if ! gh pr merge "$PR_NUMBER" --auto --rebase --repo ${{ github.repository }}; then
             echo "::error::Failed to enable auto-merge for PR #$PR_NUMBER"
             exit 1
           fi
