@@ -324,6 +324,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
       - name: Check branches and verify merge readiness
         id: check-branches
         env:
@@ -370,7 +378,9 @@ jobs:
           GH_TOKEN: ${{ secrets.CI_CD_PAT }}
         run: |
           set -e
-          VERSION="${{ github.event.inputs.new_version }}"
+          # Read version from pyproject.toml (single source of truth)
+          VERSION="$(poetry version -s)"
+          echo "Using version from pyproject.toml: $VERSION"
 
           # Create PR with auto-merge enabled
           PR_URL=$(gh pr create \
