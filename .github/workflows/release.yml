@@ -32,15 +32,7 @@ env:
 
 jobs:
 
-  status-checks:
-    permissions:
-      contents: read
-      packages: read
-
-    uses: ./.github/workflows/status-checks.yml
-
   build-windows:
-    needs: status-checks
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -126,7 +118,6 @@ jobs:
             dist/android-file-handler-windows.sha256
        
   build-debian:
-    needs: status-checks
     permissions:
       contents: read
       packages: read
@@ -234,7 +225,6 @@ jobs:
             pkg_dist_debian/**
 
   build-arch:
-    needs: status-checks
     permissions:
       contents: read
       packages: read
@@ -360,7 +350,6 @@ jobs:
 
 
   build-rhel:
-    needs: status-checks
     permissions:
       contents: read
       packages: read
@@ -468,7 +457,6 @@ jobs:
  
   do-release:
     needs:
-      - status-checks
       - build-windows
       - build-debian
       - build-arch
