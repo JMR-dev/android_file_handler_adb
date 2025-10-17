@@ -33,8 +33,6 @@ on:
         options:
           - "bump-version"
           - "merge-develop-to-main"
-          - "build-artifacts"
-          - "do-release"
 
 permissions:
   contents: write
@@ -428,7 +426,8 @@ jobs:
     if: |
       ${{
         always() &&
-        (github.event.inputs.start_from_step == 'bump-version' || github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
         needs.merge-develop-to-main.result == 'success'
       }}
     runs-on: ubuntu-latest
@@ -541,9 +540,8 @@ jobs:
         always() &&
         contains(github.event.inputs.jobs, 'build-windows') &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts') &&
-        (needs.wait-for-main-pr.result == 'success' || needs.wait-for-main-pr.result == 'skipped')
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
       }}
     runs-on: windows-latest
     steps:
@@ -636,9 +634,8 @@ jobs:
         always() &&
         contains(github.event.inputs.jobs, 'build-debian') &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts') &&
-        (needs.wait-for-main-pr.result == 'success' || needs.wait-for-main-pr.result == 'skipped')
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
       }}
     permissions:
       contents: read
@@ -753,9 +750,8 @@ jobs:
         always() &&
         contains(github.event.inputs.jobs, 'build-arch') &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts') &&
-        (needs.wait-for-main-pr.result == 'success' || needs.wait-for-main-pr.result == 'skipped')
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
       }}
     permissions:
       contents: read
@@ -888,9 +884,8 @@ jobs:
         always() &&
         contains(github.event.inputs.jobs, 'build-rhel') &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts') &&
-        (needs.wait-for-main-pr.result == 'success' || needs.wait-for-main-pr.result == 'skipped')
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
       }}
     permissions:
       contents: read
@@ -1002,8 +997,7 @@ jobs:
       ${{
         always() &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts') &&
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
         needs.wait-for-main-pr.result == 'success' &&
         (needs.build-windows.result == 'failure' ||
          needs.build-debian.result == 'failure' ||
@@ -1080,9 +1074,7 @@ jobs:
       ${{
         always() &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts' ||
-         github.event.inputs.start_from_step == 'do-release') &&
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
         needs.rollback-on-build-failure.result != 'failure' &&
         (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
         (needs.build-debian.result == 'success' || needs.build-debian.result == 'skipped') &&
@@ -1159,9 +1151,7 @@ jobs:
       ${{
         always() &&
         (github.event.inputs.start_from_step == 'bump-version' ||
-         github.event.inputs.start_from_step == 'merge-develop-to-main' ||
-         github.event.inputs.start_from_step == 'build-artifacts' ||
-         github.event.inputs.start_from_step == 'do-release') &&
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
         needs.rollback-on-build-failure.result != 'failure' &&
         (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
         (needs.build-debian.result == 'success' || needs.build-debian.result == 'skipped') &&
