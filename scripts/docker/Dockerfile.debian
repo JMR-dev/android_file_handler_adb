@@ -1,46 +1,45 @@
-# Dockerfile for RHEL/Fedora build environment
-# Automates all setup steps from the build-rhel workflow job
+# Dockerfile for Debian build environment
+# Automates all setup steps from the build-debian workflow job
 #
 # Usage:
-#   docker build -f scripts/docker/Dockerfile.rhel -t android-file-handler-rhel-builder .
-#   docker run -v $(pwd):/workspace -w /workspace android-file-handler-rhel-builder
+#   docker build -f scripts/docker/Dockerfile.debian -t android-file-handler-debian-builder .
+#   docker run -v $(pwd):/workspace -w /workspace android-file-handler-debian-builder
 
-FROM fedora:42
+# Use Debian 13 "Trixie" (latest stable release)
+FROM debian:13
 
 # Set build argument for fpm version (can be overridden at build time)
 ARG FPM_VERSION=1.16.0
 
-# Install system dependencies including tk8-devel for Python tkinter support
-# Using tk8 (version 8.6) instead of tk (version 9.0) for Python 3.12 compatibility
-RUN dnf -y update && \
-    dnf -y install \
+# Install system dependencies including Python build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    build-essential \
+    ruby \
+    ruby-dev \
     gcc \
     make \
-    zlib-devel \
-    bzip2 \
-    bzip2-devel \
-    readline-devel \
-    sqlite-devel \
-    openssl-devel \
-    libffi-devel \
+    zlib1g-dev \
+    ca-certificates \
+    tcl-dev \
+    tk-dev \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxcb1 \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    libffi-dev \
     wget \
     tar \
-    git \
-    curl \
-    ruby \
-    rubygems \
-    rpm-build \
-    redhat-rpm-config \
-    gcc-c++ \
-    patch \
-    which \
-    xz-devel \
-    tk-devel \
-    tcl-devel \
-    libX11-devel \
-    libXext-devel \
-    libXrender-devel && \
-    dnf clean all
+    liblzma-dev \
+    patch && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install pyenv
 ENV PYENV_ROOT="/root/.pyenv"
@@ -49,10 +48,10 @@ ENV PATH="$PYENV_ROOT/bin:$PATH"
 RUN git clone https://github.com/pyenv/pyenv.git /root/.pyenv
 
 # Install Python 3.12 via pyenv with tkinter support
-# The tk8-devel package must be installed before this step for _tkinter to be compiled
+# The tk8.6-dev package must be installed before this step for _tkinter to be compiled
 RUN eval "$(pyenv init -)" && \
-    LDFLAGS="-L/usr/lib64" \
-    CPPFLAGS="-I/usr/include" \
+    LDFLAGS="-L/usr/lib/x86_64-linux-gnu" \
+    CPPFLAGS="-I/usr/include/tcl8.6" \
     PYTHON_CONFIGURE_OPTS="--enable-shared" \
     pyenv install 3.13 && \
     pyenv global 3.13 && \
@@ -82,7 +81,7 @@ WORKDIR /workspace
 
 # Set environment variables for build
 ENV CI_CD=true
-ENV DISTRO_TYPE=rhel
+ENV DISTRO_TYPE=debian
 
 # Default command runs the build script
 CMD ["sh", "-c", "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"]

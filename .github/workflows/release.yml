@@ -12,14 +12,37 @@ name: Build Multi-Platform Binaries
 on:
   workflow_dispatch:
     inputs:
+      new_version:
+        description: "New version to release (e.g., 0.2.0)"
+        required: false
+        type: string
+      pr_check_timeout:
+        description: "Timeout in seconds for PR status checks (default: 1800)"
+        required: false
+        type: number
+        default: 1800
       jobs:
         description: "Comma-separated jobs to run (e.g., build-windows,build-debian,build-arch,build-rhel)"
         required: true
         default: "build-windows,build-debian,build-arch,build-rhel"
+      start_from_step:
+        description: "Start workflow from this step (all subsequent steps will run)"
+        required: false
+        type: choice
+        default: "bump-version"
+        options:
+          - "bump-version"
+          - "merge-develop-to-main"
 
 permissions:
   contents: write
   pull-requests: write
+
+# Prevent multiple release workflows from running simultaneously
+# This is critical to prevent concurrent rollbacks
+concurrency:
+  group: release-workflow
+  cancel-in-progress: false
 
 env:
   # change this if you prefer a different pinned fpm version
@@ -29,13 +52,268 @@ env:
   CI_CD: true
 
 jobs:
-  merge-develop-to-main:
+  bump-version:
+    if: ${{ github.event.inputs.start_from_step == 'bump-version' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.create-pr.outputs.pr_number }}
+    steps:
+      - name: Validate version input
+        run: |
+          VERSION="${{ github.event.inputs.new_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version number is required for the bump-version task"
+            echo "::error::Please provide a version number in the 'new_version' input field"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
+          # Full semver regex supporting:
+          # - Basic: 1.2.3
+          # - Prerelease: 1.2.3-beta, 1.2.3-rc.1, 1.2.3-alpha.1.2
+          # - Build metadata: 1.2.3+build, 1.2.3+20130313144700
+          # - Combined: 1.2.3-beta.1+build.123
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
+          echo "Version format is valid: $VERSION"
+
+      - name: Checkout develop branch
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Check for existing PR or branch
+        id: check-existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.new_version }}"
+          BRANCH_NAME="release/v${VERSION}"
+
+          # Check if branch already exists
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+            echo "::warning::Branch $BRANCH_NAME already exists"
+
+            # Check if there's an open PR for this branch
+            EXISTING_PR=$(gh pr list --base develop --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
+
+            if [ -n "$EXISTING_PR" ]; then
+              echo "::error::PR #$EXISTING_PR already exists for version $VERSION"
+              echo "::error::Please close or merge the existing PR before creating a new release"
+              exit 1
+            fi
+
+            echo "::error::Branch $BRANCH_NAME exists but no open PR found"
+            echo "::error::Please delete the branch or use a different version number"
+            exit 1
+          fi
+
+          echo "✓ No existing branch or PR found for version $VERSION"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create release branch and bump version
+        id: bump
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.new_version }}"
+          BRANCH_NAME="${{ steps.check-existing.outputs.branch_name }}"
+
+          # Create and checkout release branch
+          git checkout -b "$BRANCH_NAME"
+
+          # Update version in pyproject.toml
+          poetry version "$VERSION"
+
+          # Commit the version change
+          git add pyproject.toml
+          git commit -m "Bump version to ${VERSION}"
+
+          # Push the branch with error handling
+          if ! git push origin "$BRANCH_NAME"; then
+            echo "::error::Failed to push branch $BRANCH_NAME"
+            exit 1
+          fi
+
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create PR to develop
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ secrets.CI_CD_PAT }}
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.new_version }}"
+          BRANCH_NAME="${{ steps.bump.outputs.branch_name }}"
+
+          # Create PR with auto-merge enabled
+          PR_URL=$(gh pr create \
+            --base develop \
+            --head "$BRANCH_NAME" \
+            --title "Release v${VERSION}" \
+            --body "This PR bumps the version to ${VERSION} as part of the release process.
+
+          **Auto-generated by release workflow**
+
+          Once status checks pass, this PR will be automatically merged." \
+            --repo ${{ github.repository }} || {
+              echo "::error::Failed to create PR"
+              exit 1
+            })
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Created PR #$PR_NUMBER: $PR_URL"
+
+          # Enable auto-merge (rebase)
+          if ! gh pr merge "$PR_NUMBER" --auto --rebase --repo ${{ github.repository }}; then
+            echo "::error::Failed to enable auto-merge for PR #$PR_NUMBER"
+            exit 1
+          fi
+          echo "Auto-merge enabled for PR #$PR_NUMBER"
+
+  wait-for-version-pr:
+    needs: [bump-version]
+    if: ${{ github.event.inputs.start_from_step == 'bump-version' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Wait for PR status checks and merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          PR_NUMBER="${{ needs.bump-version.outputs.pr_number }}"
+          echo "Monitoring PR #$PR_NUMBER for status checks..."
+
+          MAX_WAIT=${{ github.event.inputs.pr_check_timeout || 1800 }}
+          INITIAL_INTERVAL=10
+          MAX_INTERVAL=300  # 5 minutes maximum
+          BACKOFF_MULTIPLIER=1.5
+          SLEEP_INTERVAL=$INITIAL_INTERVAL
+          ELAPSED=0
+          PR_STATE_RETRY_COUNT=0
+          STATUS_CHECK_RETRY_COUNT=0
+          MAX_RETRIES=3
+          echo "Max wait time: ${MAX_WAIT}s, using exponential backoff (max interval: ${MAX_INTERVAL}s)"
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            # Get PR status with retry logic
+            if ! PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' --repo ${{ github.repository }} 2>&1); then
+              PR_STATE_RETRY_COUNT=$((PR_STATE_RETRY_COUNT + 1))
+              if [ $PR_STATE_RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "::error::Failed to fetch PR status after $MAX_RETRIES retries"
+                exit 1
+              fi
+              echo "::warning::Failed to fetch PR status (attempt $PR_STATE_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** PR_STATE_RETRY_COUNT))
+              continue
+            fi
+            PR_STATE_RETRY_COUNT=0
+
+            if [ "$PR_STATE" = "MERGED" ]; then
+              echo "✓ PR #$PR_NUMBER has been merged successfully!"
+              exit 0
+            fi
+
+            if [ "$PR_STATE" = "CLOSED" ]; then
+              echo "::error::PR #$PR_NUMBER was closed without merging"
+              exit 1
+            fi
+
+            # Check status checks with retry logic
+            if ! STATUS_JSON=$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup' --repo ${{ github.repository }} 2>&1); then
+              STATUS_CHECK_RETRY_COUNT=$((STATUS_CHECK_RETRY_COUNT + 1))
+              if [ $STATUS_CHECK_RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "::error::Failed to fetch status checks after $MAX_RETRIES retries"
+                exit 1
+              fi
+              echo "::warning::Failed to fetch status checks (attempt $STATUS_CHECK_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** STATUS_CHECK_RETRY_COUNT))
+              continue
+            fi
+            STATUS_CHECK_RETRY_COUNT=0
+
+            # Count check states
+            TOTAL=$(echo "$STATUS_JSON" | jq 'length')
+            COMPLETED=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion != null)] | length')
+            SUCCESS=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion == "SUCCESS" or .conclusion == "NEUTRAL" or .conclusion == "SKIPPED")] | length')
+            FAILED=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT")] | length')
+
+            echo "Status checks: $COMPLETED/$TOTAL completed, $SUCCESS passed, $FAILED failed (interval: ${SLEEP_INTERVAL}s)"
+
+            # Check for failures
+            if [ "$FAILED" -gt 0 ]; then
+              echo "::error::Status checks failed for PR #$PR_NUMBER"
+              gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT") | "- " + .name + ": " + .conclusion' --repo ${{ github.repository }}
+              exit 1
+            fi
+
+            echo "Waiting for checks to complete... (${ELAPSED}s elapsed)"
+            sleep $SLEEP_INTERVAL
+            ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+
+            # Calculate next interval with exponential backoff (capped at MAX_INTERVAL)
+            NEXT_INTERVAL=$(awk "BEGIN {printf \"%.0f\", $SLEEP_INTERVAL * $BACKOFF_MULTIPLIER}")
+            if [ $NEXT_INTERVAL -gt $MAX_INTERVAL ]; then
+              SLEEP_INTERVAL=$MAX_INTERVAL
+            else
+              SLEEP_INTERVAL=$NEXT_INTERVAL
+            fi
+          done
+
+          echo "::error::Timeout waiting for PR #$PR_NUMBER to merge"
+          exit 1
+
+  merge-develop-to-main:
+    needs: [wait-for-version-pr]
+    if: |
+      ${{
+        always() &&
+        (github.event.inputs.start_from_step == 'bump-version' || github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        (needs.wait-for-version-pr.result == 'success' || needs.wait-for-version-pr.result == 'skipped')
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    # Ensure only one merge operation runs at a time
+    concurrency:
+      group: main-branch-merge
+      cancel-in-progress: false
+    outputs:
+      pr_number: ${{ steps.create-pr.outputs.pr_number }}
+      previous_main_sha: ${{ steps.check-branches.outputs.previous_main_sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: develop
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -44,10 +322,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Fast-forward main to develop
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Check branches and verify merge readiness
+        id: check-branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           git fetch origin main develop
+
+          # Store current main SHA for reference
+          PREVIOUS_MAIN_SHA=$(git rev-parse origin/main)
+          echo "previous_main_sha=$PREVIOUS_MAIN_SHA" >> $GITHUB_OUTPUT
+          echo "Previous main SHA: $PREVIOUS_MAIN_SHA"
 
           # Verify develop is ahead of main
           MERGE_BASE=$(git merge-base origin/main origin/develop)
@@ -62,85 +356,193 @@ jobs:
           # Ensure develop is actually ahead
           DEVELOP_SHA=$(git rev-parse origin/develop)
           if [ "$MAIN_SHA" = "$DEVELOP_SHA" ]; then
-            echo "Main is already up to date with develop. Nothing to merge."
+            echo "::warning::Main is already up to date with develop. Nothing to merge."
             exit 0
           fi
 
-          # Fast-forward merge develop into main
-          git checkout main
-          git merge origin/develop --ff-only
+          # Check for existing open PR from develop to main
+          EXISTING_PR=$(gh pr list --base main --head develop --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING_PR" ]; then
+            echo "::error::PR #$EXISTING_PR already exists from develop to main"
+            echo "::error::Please close or merge the existing PR before creating a new one"
+            exit 1
+          fi
 
-          echo "Successfully fast-forwarded main to develop"
-          git log origin/main..HEAD --oneline
+          echo "✓ Ready to create PR from develop to main"
 
-          git push origin main
+      - name: Create PR from develop to main
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ secrets.CI_CD_PAT }}
+        run: |
+          set -e
+          # Read version from pyproject.toml (single source of truth)
+          if ! VERSION="$(poetry version -s 2>&1)"; then
+            echo "::error::Failed to read version from pyproject.toml"
+            echo "::error::Poetry output: $VERSION"
+            exit 1
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is empty in pyproject.toml"
+            exit 1
+          fi
+          # Validate semver format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            echo "::error::Invalid version format in pyproject.toml: $VERSION"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
+          echo "Using version from pyproject.toml: $VERSION"
 
-  run-unit-tests-linux:
+          # Create PR with auto-merge enabled
+          PR_URL=$(gh pr create \
+            --base main \
+            --head develop \
+            --title "Release v${VERSION} - Merge develop into main" \
+            --body "This PR merges develop into main for release v${VERSION}.
+
+          **Auto-generated by release workflow**
+
+          Once status checks pass, this PR will be automatically merged." \
+            --repo ${{ github.repository }} || {
+              echo "::error::Failed to create PR"
+              exit 1
+            })
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Created PR #$PR_NUMBER: $PR_URL"
+
+          # Enable auto-merge (rebase for fast-forward)
+          if ! gh pr merge "$PR_NUMBER" --auto --rebase --repo ${{ github.repository }}; then
+            echo "::error::Failed to enable auto-merge for PR #$PR_NUMBER"
+            exit 1
+          fi
+          echo "Auto-merge enabled for PR #$PR_NUMBER"
+
+  wait-for-main-pr:
     needs: [merge-develop-to-main]
+    if: |
+      ${{
+        always() &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.merge-develop-to-main.result == 'success'
+      }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      merge_commit_sha: ${{ steps.wait-merge.outputs.merge_commit_sha }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Display build information
+      - name: Wait for PR status checks and merge
+        id: wait-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Event: ${{ github.event_name }}"
-          echo "Jobs to run: ${{ github.event.inputs.jobs || 'build-windows,build-debian,build-arch,build-rhel' }}"
+          set -e
+          PR_NUMBER="${{ needs.merge-develop-to-main.outputs.pr_number }}"
+          echo "Monitoring PR #$PR_NUMBER for status checks..."
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+          MAX_WAIT=${{ github.event.inputs.pr_check_timeout || 1800 }}
+          INITIAL_INTERVAL=10
+          MAX_INTERVAL=300  # 5 minutes maximum
+          BACKOFF_MULTIPLIER=1.5
+          SLEEP_INTERVAL=$INITIAL_INTERVAL
+          ELAPSED=0
+          PR_STATE_RETRY_COUNT=0
+          STATUS_CHECK_RETRY_COUNT=0
+          MAX_RETRIES=3
+          echo "Max wait time: ${MAX_WAIT}s, using exponential backoff (max interval: ${MAX_INTERVAL}s)"
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            # Get PR status with retry logic
+            if ! PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' --repo ${{ github.repository }} 2>&1); then
+              PR_STATE_RETRY_COUNT=$((PR_STATE_RETRY_COUNT + 1))
+              if [ $PR_STATE_RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "::error::Failed to fetch PR status after $MAX_RETRIES retries"
+                exit 1
+              fi
+              echo "::warning::Failed to fetch PR status (attempt $PR_STATE_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** PR_STATE_RETRY_COUNT))
+              continue
+            fi
+            PR_STATE_RETRY_COUNT=0
 
-      - name: Install dependencies
-        run: |
-          poetry install
+            if [ "$PR_STATE" = "MERGED" ]; then
+              echo "✓ PR #$PR_NUMBER has been merged successfully!"
 
-      - name: Run tests
-        run: |
-          poetry run pytest tests/ -v
-  
-  run-unit-tests-windows:
-    needs: [merge-develop-to-main]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
+              # Get the merge commit SHA
+              MERGE_COMMIT_SHA=$(gh pr view "$PR_NUMBER" --json mergeCommit --jq '.mergeCommit.oid' --repo ${{ github.repository }})
+              echo "merge_commit_sha=$MERGE_COMMIT_SHA" >> $GITHUB_OUTPUT
+              echo "Merge commit SHA: $MERGE_COMMIT_SHA"
+              exit 0
+            fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+            if [ "$PR_STATE" = "CLOSED" ]; then
+              echo "::error::PR #$PR_NUMBER was closed without merging"
+              exit 1
+            fi
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: latest
-          virtualenvs-create: true
-          virtualenvs-in-project: true
+            # Check status checks with retry logic
+            if ! STATUS_JSON=$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup' --repo ${{ github.repository }} 2>&1); then
+              STATUS_CHECK_RETRY_COUNT=$((STATUS_CHECK_RETRY_COUNT + 1))
+              if [ $STATUS_CHECK_RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "::error::Failed to fetch status checks after $MAX_RETRIES retries"
+                exit 1
+              fi
+              echo "::warning::Failed to fetch status checks (attempt $STATUS_CHECK_RETRY_COUNT/$MAX_RETRIES), retrying..."
+              sleep $((2 ** STATUS_CHECK_RETRY_COUNT))
+              continue
+            fi
+            STATUS_CHECK_RETRY_COUNT=0
 
-      - name: Ensure Poetry is on PATH (Windows)
-        shell: pwsh
-        run: |
-          # Add Poetry user bin to PATH for subsequent steps in this job
-          $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
-          Write-Output $poetryPath >> $Env:GITHUB_PATH
+            # Count check states
+            TOTAL=$(echo "$STATUS_JSON" | jq 'length')
+            COMPLETED=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion != null)] | length')
+            SUCCESS=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion == "SUCCESS" or .conclusion == "NEUTRAL" or .conclusion == "SKIPPED")] | length')
+            FAILED=$(echo "$STATUS_JSON" | jq '[.[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT")] | length')
 
-      - name: Install dependencies
-        run: |
-          poetry install
+            echo "Status checks: $COMPLETED/$TOTAL completed, $SUCCESS passed, $FAILED failed (interval: ${SLEEP_INTERVAL}s)"
 
-      - name: Run tests
-        run: |
-          poetry run pytest tests/ -v
+            # Check for failures
+            if [ "$FAILED" -gt 0 ]; then
+              echo "::error::Status checks failed for PR #$PR_NUMBER"
+              gh pr view "$PR_NUMBER" --json statusCheckRollup --jq '.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT") | "- " + .name + ": " + .conclusion' --repo ${{ github.repository }}
+              exit 1
+            fi
+
+            echo "Waiting for checks to complete... (${ELAPSED}s elapsed)"
+            sleep $SLEEP_INTERVAL
+            ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+
+            # Calculate next interval with exponential backoff (capped at MAX_INTERVAL)
+            NEXT_INTERVAL=$(awk "BEGIN {printf \"%.0f\", $SLEEP_INTERVAL * $BACKOFF_MULTIPLIER}")
+            if [ $NEXT_INTERVAL -gt $MAX_INTERVAL ]; then
+              SLEEP_INTERVAL=$MAX_INTERVAL
+            else
+              SLEEP_INTERVAL=$NEXT_INTERVAL
+            fi
+          done
+
+          echo "::error::Timeout waiting for PR #$PR_NUMBER to merge"
+          exit 1
+
   build-windows:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-windows') }}
+    needs: [wait-for-main-pr]
+    if: |
+      ${{
+        always() &&
+        contains(github.event.inputs.jobs, 'build-windows') &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
+      }}
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -148,10 +550,10 @@ jobs:
         with:
           ref: main
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
@@ -176,77 +578,110 @@ jobs:
           # Use the Windows spec file so packaging is consistent and reproducible
           poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 
+      - name: Import GPG key
+        shell: pwsh
+        run: |
+          $env:GPG_TTY = "not a tty"
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Windows executable
+        shell: pwsh
+        run: |
+          $exePath = Get-ChildItem -Path dist -Filter "android-file-handler.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exePath) {
+            Write-Error "Executable not found"
+            exit 1
+          }
+          Write-Output "Found executable: $exePath"
+
+          # Create temporary file for passphrase
+          $passphraseFile = New-TemporaryFile
+          try {
+            "${{ secrets.GPG_PASSPHRASE }}" | Out-File -FilePath $passphraseFile -Encoding ASCII -NoNewline
+
+            # Sign with GPG using passphrase file
+            gpg --batch --yes --passphrase-file "$passphraseFile" --detach-sign --armor "$exePath"
+          }
+          finally {
+            # Clean up passphrase file
+            if (Test-Path $passphraseFile) {
+              Remove-Item $passphraseFile -Force
+            }
+          }
+
+          # Generate SHA-256 hash
+          $hash = (Get-FileHash -Path "$exePath" -Algorithm SHA256).Hash.ToLower()
+          $hashFile = "dist/android-file-handler-windows.sha256"
+          "$hash  $(Split-Path -Leaf $exePath)" | Out-File -FilePath $hashFile -Encoding ASCII -NoNewline
+          Write-Output "SHA-256: $hash"
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
           path: |
             dist/**/android-file-handler*.exe
+            dist/**/android-file-handler*.exe.asc
             dist/android-file-handler.exe
+            dist/android-file-handler.exe.asc
+            dist/android-file-handler-windows.sha256
        
   build-debian:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-debian') }}
+    needs: [wait-for-main-pr]
+    if: |
+      ${{
+        always() &&
+        contains(github.event.inputs.jobs, 'build-debian') &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
+      }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: debian
     runs-on: ubuntu-latest
     container:
-      image: python:3.12-slim
+      image: ghcr.io/jmr-dev/android-file-handler-debian-builder:debian13-trixie
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Install system dependencies & gem fpm (include Tcl/Tk)
-        run: |
-          set -euo pipefail
-          apt-get update
-          # Install Tcl/Tk runtimes, dev headers and common X libraries required by tkinter
-          apt-get install -y --no-install-recommends \
-            curl git build-essential ruby ruby-dev gcc make zlib1g-dev ca-certificates python3-tk \
-            tcl8.6 tk8.6 tcl8.6-dev tk8.6-dev libx11-6 libxext6 libxrender1 libxcb1
-          # install pinned fpm to the system gem dir (will be available under gem env's EXECUTABLE DIRECTORY or /usr/local/bin)
-          gem install --no-document -v "${FPM_VERSION}" fpm
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: main
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: latest
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-
-      - name: Configure Poetry
+      - name: Build executable
         run: |
-          echo 'export PATH="$HOME/.local/bin:$PATH"' >> $GITHUB_ENV
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-
-      - name: Install dependencies & build executable
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          poetry env use python3.12 || true
-          # Debug: show tkinter/_tkinter and Tcl library discovery in the Poetry venv
-          poetry run python -c 'import tkinter, _tkinter, sys; print("tkinter=", getattr(tkinter, "__file__", None)); print("_tkinter=", getattr(_tkinter, "__file__", None)); import tkinter as tk; print("TCL_LIBRARY=", tk.Tcl().eval("info library"))'
-
-          # Build distro-specific package layout using the build script via Poetry
+          # Container has Poetry and all dependencies pre-installed
+          poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
 
       - name: Package .deb (fpm)
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          VERSION="$(poetry version -s)"
+          if ! VERSION="$(poetry version -s 2>&1)"; then
+            echo "::error::Failed to read version from pyproject.toml"
+            echo "::error::Poetry output: $VERSION"
+            exit 1
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is empty in pyproject.toml"
+            exit 1
+          fi
+          # Validate semver format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            echo "::error::Invalid version format in pyproject.toml: $VERSION"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
+          echo "Using version: $VERSION"
           PKG_DIR="pkg_dist_debian"
           mkdir -p dist
-          # Debug listing
           echo "Packaging from $PKG_DIR"
           ls -la "$PKG_DIR" || true
 
@@ -259,9 +694,44 @@ jobs:
           fi
 
           fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
-            --architecture amd64 --prefix /usr/local/bin --deb-user root --deb-group root \
+            --architecture amd64 --deb-user root --deb-group root \
             --after-install scripts/debian_postinst.sh \
             -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+
+      - name: Import GPG key
+        shell: bash
+        run: |
+          export GPG_TTY=$(tty) || true
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Debian package
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB_FILE=$(find dist -name "android-file-handler_*.deb" -type f | head -n 1)
+          if [ -z "$DEB_FILE" ]; then
+            echo "Error: .deb file not found"
+            exit 1
+          fi
+          echo "Found package: $DEB_FILE"
+
+          # Create temporary file for passphrase
+          PASSPHRASE_FILE=$(mktemp)
+          trap "rm -f '$PASSPHRASE_FILE'" EXIT
+
+          # Write passphrase to temporary file
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$PASSPHRASE_FILE"
+
+          # Sign with GPG using passphrase file
+          gpg --batch --yes --passphrase-file "$PASSPHRASE_FILE" --detach-sign --armor "$DEB_FILE"
+
+          # Clean up passphrase file
+          rm -f "$PASSPHRASE_FILE"
+
+          # Generate SHA-256 hash
+          sha256sum "$DEB_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-debian.sha256
+          echo "SHA-256: $(cat dist/android-file-handler-debian.sha256)"
 
       - name: Upload Debian .deb
         uses: actions/upload-artifact@v4
@@ -269,78 +739,133 @@ jobs:
           name: debian-package
           path: |
             dist/android-file-handler_*.deb
+            dist/android-file-handler_*.deb.asc
+            dist/android-file-handler-debian.sha256
             pkg_dist_debian/**
 
   build-arch:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-arch') }}
+    needs: [wait-for-main-pr]
+    if: |
+      ${{
+        always() &&
+        contains(github.event.inputs.jobs, 'build-arch') &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
+      }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DISTRO_TYPE: arch
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
     steps:
-      - name: Install system dependencies (Arch) and system Ruby
-        run: |
-          set -euo pipefail
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm ruby base-devel curl git tar ca-certificates tk tcl libx11 libxext libxrender libxcb
-          # Install fpm system-wide and pin version so fpm will be in /usr/in
-          gem install --no-document erb
-          gem install --no-document -v "${FPM_VERSION}" fpm --bindir /usr/bin
-          # persist system bindir to subsequent steps (usually already on PATH)
-          echo "/usr/local/bin" >> $GITHUB_PATH
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: main
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
         with:
-          python-version: '3.12'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CI_CD_PAT }}
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: latest
-          virtualenvs-create: true
-          virtualenvs-in-project: true
+      - name: Pull Docker image
+        run: docker pull ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
 
-      - name: Configure Poetry
+      - name: Build executable inside container
         run: |
-          echo 'export PATH="$HOME/bin:$PATH"' >> $GITHUB_ENV
-          export PATH="$HOME/bin:$PATH"
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e DISTRO_TYPE=${{ env.DISTRO_TYPE }} \
+            -e FPM_VERSION=${{ env.FPM_VERSION }} \
+            -e CI_CD=${{ env.CI_CD }} \
+            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
+            sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
 
-      - name: Install dependencies & build executable
+      - name: Package pacman (fpm) inside container
         run: |
-          export PATH="$HOME/bin:/usr/bin:$PATH"
-          # Use unified build script to produce pkg_dist_arch layout via Poetry
-          poetry run python scripts/build_package_linux.py
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e FPM_VERSION=${{ env.FPM_VERSION }} \
+            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
+            sh -c 'set -euo pipefail && \
+            if ! VERSION="$(poetry version -s 2>&1)"; then \
+              echo "::error::Failed to read version from pyproject.toml" >&2 && \
+              echo "::error::Poetry output: $VERSION" >&2 && \
+              exit 1; \
+            fi && \
+            if [ -z "$VERSION" ]; then \
+              echo "::error::Version is empty in pyproject.toml" >&2 && \
+              exit 1; \
+            fi && \
+            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then \
+              echo "::error::Invalid version format in pyproject.toml: $VERSION" >&2 && \
+              echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)" >&2 && \
+              exit 1; \
+            fi && \
+            echo "Using version: $VERSION" && \
+            PKG_DIR="pkg_dist_arch" && \
+            mkdir -p dist && \
+            echo "Packaging from $PKG_DIR" && \
+            ls -la "$PKG_DIR" || true && \
+            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png" && \
+            if [ -f "$ICON_PATH" ]; then \
+              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+                --architecture x86_64 \
+                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
+                -C "$PKG_DIR" \
+                "usr/bin/android-file-handler" \
+                "usr/share/applications/android-file-handler.desktop" \
+                "usr/share/icons/hicolor/256x256/apps/android-file-handler.png"; \
+            else \
+              echo "Note: icon not present, packaging without icon" && \
+              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
+                --architecture x86_64 \
+                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
+                -C "$PKG_DIR" \
+                "usr/bin/android-file-handler" \
+                "usr/share/applications/android-file-handler.desktop"; \
+            fi'
 
-      - name: Package pacman (fpm)
+      - name: Import GPG key
+        shell: bash
+        run: |
+          export GPG_TTY=$(tty) || true
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Arch package
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:/usr/bin:$PATH"
-          VERSION="$(poetry version -s)"
-          PKG_DIR="pkg_dist_arch"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
+          PKG_FILE=$(find dist -name "android-file-handler-*.pkg.tar.zst" -type f | head -n 1)
+          if [ -z "$PKG_FILE" ]; then
+            echo "Error: .pkg.tar.zst file not found"
+            exit 1
           fi
+          echo "Found package: $PKG_FILE"
 
-          fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-            --architecture x86_64 --prefix /usr/bin \
-            -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
+          # Create temporary file for passphrase
+          PASSPHRASE_FILE=$(mktemp)
+          trap "rm -f '$PASSPHRASE_FILE'" EXIT
+
+          # Write passphrase to temporary file
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$PASSPHRASE_FILE"
+
+          # Sign with GPG using passphrase file
+          gpg --batch --yes --passphrase-file "$PASSPHRASE_FILE" --detach-sign --armor "$PKG_FILE"
+
+          # Clean up passphrase file
+          rm -f "$PASSPHRASE_FILE"
+
+          # Generate SHA-256 hash
+          sha256sum "$PKG_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-arch.sha256
+          echo "SHA-256: $(cat dist/android-file-handler-arch.sha256)"
 
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
@@ -348,12 +873,20 @@ jobs:
           name: arch-package
           path: |
             dist/*.pkg.tar.*
+            dist/android-file-handler-arch.sha256
             pkg_dist_arch/**
 
 
   build-rhel:
-    needs: [run-unit-tests-linux, run-unit-tests-windows]
-    if: ${{ contains(github.event.inputs.jobs, 'build-rhel') }}
+    needs: [wait-for-main-pr]
+    if: |
+      ${{
+        always() &&
+        contains(github.event.inputs.jobs, 'build-rhel') &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success'
+      }}
     permissions:
       contents: read
       packages: read
@@ -361,7 +894,10 @@ jobs:
       DISTRO_TYPE: rhel
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/jmr-dev/android-file-handler-adb:v0.1.0
+      image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -371,8 +907,7 @@ jobs:
       - name: Build RHEL package
         run: |
           set -euo pipefail
-          export CI_CD=true
-          export DISTRO_TYPE=rhel
+          # Container has Poetry and all dependencies pre-installed
           poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
 
@@ -380,7 +915,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(poetry version -s)"
+          if ! VERSION="$(poetry version -s 2>&1)"; then
+            echo "::error::Failed to read version from pyproject.toml"
+            echo "::error::Poetry output: $VERSION"
+            exit 1
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is empty in pyproject.toml"
+            exit 1
+          fi
+          # Validate semver format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            echo "::error::Invalid version format in pyproject.toml: $VERSION"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
+          echo "Using version: $VERSION"
           PKG_DIR="pkg_dist_rhel"
           mkdir -p dist
           echo "Packaging from $PKG_DIR (version=$VERSION)"
@@ -396,19 +946,141 @@ jobs:
 
           fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p "dist/android-file-handler-${VERSION}.x86_64.rpm" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
+      - name: Import GPG key
+        shell: bash
+        run: |
+          export GPG_TTY=$(tty) || true
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash RHEL package
+        shell: bash
+        run: |
+          set -euo pipefail
+          RPM_FILE=$(find dist -name "android-file-handler-*.rpm" -type f | head -n 1)
+          if [ -z "$RPM_FILE" ]; then
+            echo "Error: .rpm file not found"
+            exit 1
+          fi
+          echo "Found package: $RPM_FILE"
+
+          # Create temporary file for passphrase
+          PASSPHRASE_FILE=$(mktemp)
+          trap "rm -f '$PASSPHRASE_FILE'" EXIT
+
+          # Write passphrase to temporary file
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$PASSPHRASE_FILE"
+
+          # Sign with GPG using passphrase file
+          gpg --batch --yes --passphrase-file "$PASSPHRASE_FILE" --detach-sign --armor "$RPM_FILE"
+
+          # Clean up passphrase file
+          rm -f "$PASSPHRASE_FILE"
+
+          # Generate SHA-256 hash
+          sha256sum "$RPM_FILE" | awk '{print $1 "  " $2}' > dist/android-file-handler-rhel.sha256
+          echo "SHA-256: $(cat dist/android-file-handler-rhel.sha256)"
+
       - name: Upload RHEL artifacts
         uses: actions/upload-artifact@v4
         with:
           name: rhel-package
           path: |
             dist/*.rpm
+            dist/*.rpm.asc
+            dist/android-file-handler-rhel.sha256
             pkg_dist_rhel/**
 
+  rollback-on-build-failure:
+    needs: [merge-develop-to-main, wait-for-main-pr, build-windows, build-debian, build-arch, build-rhel]
+    if: |
+      ${{
+        always() &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success' &&
+        (needs.build-windows.result == 'failure' ||
+         needs.build-debian.result == 'failure' ||
+         needs.build-arch.result == 'failure' ||
+         needs.build-rhel.result == 'failure')
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Prevent multiple rollback operations from running concurrently
+    concurrency:
+      group: main-branch-rollback
+      cancel-in-progress: false
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    
+      - name: Rollback merge commit on build failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "::error::One or more build jobs failed - initiating rollback"
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch latest
+          git fetch origin main
+
+          # Get the previous main SHA (before the merge)
+          PREVIOUS_MAIN_SHA="${{ needs.merge-develop-to-main.outputs.previous_main_sha }}"
+          echo "Resetting main to previous commit: $PREVIOUS_MAIN_SHA"
+
+          # Checkout main and reset to previous commit
+          git checkout main
+          git reset --hard "$PREVIOUS_MAIN_SHA"
+
+          # Force push the rollback
+          if ! git push --force origin main; then
+            git notes -m 'release commit could not be rolled back'
+            echo "::error::Failed to push rollback to main"
+            exit 1
+          fi
+          git notes -m 'release commit rolled back'
+          echo "::error::Reset main branch to commit $PREVIOUS_MAIN_SHA"
+          echo "::error::Build failures detected:"
+
+          # Report which builds failed
+          if [ "${{ needs.build-windows.result }}" = "failure" ]; then
+            echo "::error::  - build-windows: FAILED"
+          fi
+          if [ "${{ needs.build-debian.result }}" = "failure" ]; then
+            echo "::error::  - build-debian: FAILED"
+          fi
+          if [ "${{ needs.build-arch.result }}" = "failure" ]; then
+            echo "::error::  - build-arch: FAILED"
+          fi
+          if [ "${{ needs.build-rhel.result }}" = "failure" ]; then
+            echo "::error::  - build-rhel: FAILED"
+          fi
+
+          exit 1
+
+
   do-release:
-    needs: [build-windows, build-debian, build-arch, build-rhel]
-    if: ${{ needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
+    needs: [rollback-on-build-failure, build-windows, build-debian, build-arch, build-rhel]
+    if: |
+      ${{
+        always() &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.rollback-on-build-failure.result != 'failure' &&
+        (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
+        (needs.build-debian.result == 'success' || needs.build-debian.result == 'skipped') &&
+        (needs.build-arch.result == 'success' || needs.build-arch.result == 'skipped') &&
+        (needs.build-rhel.result == 'success' || needs.build-rhel.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -421,7 +1093,24 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
+        run: |
+          if ! VERSION="$(poetry version -s 2>&1)"; then
+            echo "::error::Failed to read version from pyproject.toml"
+            echo "::error::Poetry output: $VERSION"
+            exit 1
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is empty in pyproject.toml"
+            exit 1
+          fi
+          # Validate semver format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            echo "::error::Invalid version format in pyproject.toml: $VERSION"
+            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
+            exit 1
+          fi
+          echo "Using version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -432,10 +1121,18 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p ./release-files
+          # Copy binary packages
           find ./binaries -name "*.exe" -exec cp {} ./release-files/ \; || true
           find ./binaries -name "*.deb" -exec cp {} ./release-files/ \; || true
           find ./binaries -name "*.rpm" -exec cp {} ./release-files/ \; || true
           find ./binaries -name "*.pkg.tar.*" -exec cp {} ./release-files/ \; || true
+          # Copy GPG signatures
+          find ./binaries -name "*.asc" -exec cp {} ./release-files/ \; || true
+          # Copy SHA-256 hashes
+          find ./binaries -name "*.sha256" -exec cp {} ./release-files/ \; || true
+
+          echo "Release files prepared:"
+          ls -lh ./release-files/
         
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -449,8 +1146,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-s3:
-    needs: [build-windows, build-debian, build-arch, build-rhel]
-    if: ${{ needs.build-windows.result == 'success' && needs.build-debian.result == 'success' && needs.build-arch.result == 'success' && needs.build-rhel.result == 'success' }}
+    needs: [rollback-on-build-failure, build-windows, build-debian, build-arch, build-rhel]
+    if: |
+      ${{
+        always() &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.rollback-on-build-failure.result != 'failure' &&
+        (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
+        (needs.build-debian.result == 'success' || needs.build-debian.result == 'skipped') &&
+        (needs.build-arch.result == 'success' || needs.build-arch.result == 'skipped') &&
+        (needs.build-rhel.result == 'success' || needs.build-rhel.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

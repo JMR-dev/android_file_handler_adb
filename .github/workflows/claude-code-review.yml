@@ -2,13 +2,17 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
     # Optional: Only run on specific file changes
     # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    #   - "src/**/*.py"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run the review against'
+        required: true
+        default: 'develop'
+        type: string
 
 permissions:
   contents: read
@@ -33,7 +37,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.head.ref }}
+          fetch-depth: 0
 
       - name: Run Claude Code Review
         id: claude-review
@@ -42,18 +47,18 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            ${{ github.event_name == 'pull_request' && format('PR NUMBER: {0}', github.event.pull_request.number) || format('BRANCH: {0}', inputs.branch) }}
 
-            Please review this pull request and provide feedback on:
+            Please review this ${{ github.event_name == 'pull_request' && 'pull request' || format('branch ({0})', inputs.branch) }} and provide feedback on:
             - Code quality and best practices
             - Potential bugs or issues
             - Performance considerations
             - Security concerns
             - Test coverage
-            
+
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            ${{ github.event_name == 'pull_request' && 'Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.' || 'Provide a summary of your findings.' }}
           
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
