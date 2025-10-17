@@ -981,10 +981,11 @@ jobs:
 
           # Force push the rollback
           if ! git push --force origin main; then
+            git notes -m 'release commit could not be rolled back'
             echo "::error::Failed to push rollback to main"
             exit 1
           fi
-
+          git notes -m 'release commit rolled back'
           echo "::error::Reset main branch to commit $PREVIOUS_MAIN_SHA"
           echo "::error::Build failures detected:"
 
