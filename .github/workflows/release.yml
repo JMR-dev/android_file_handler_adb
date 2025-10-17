@@ -574,6 +574,9 @@ jobs:
   sync-wiki:
     needs: do-release
     if: needs.do-release.result == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
     uses: ./.github/workflows/sync-wiki.yml
     with:
       branch: main
