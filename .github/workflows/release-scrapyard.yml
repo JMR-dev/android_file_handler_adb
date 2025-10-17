@@ -631,3 +631,109 @@ jobs:
         echo "⏭️ AUR publishing skipped (dry run mode)"
         echo ""
         echo "To publish to AUR, re-run with dry_run=false"
+
+
+
+
+            inputs:
+      new_version:
+        description: "New version to release (e.g., 0.2.0)"
+        required: false
+        type: string
+      pr_check_timeout:
+        description: "Timeout in seconds for PR status checks (default: 1800)"
+        required: false
+        type: number
+        default: 1800
+      jobs:
+        description: "Comma-separated jobs to run (e.g., build-windows,build-debian,build-arch,build-rhel)"
+        required: true
+        default: "build-windows,build-debian,build-arch,build-rhel"
+      start_from_step:
+        description: "Start workflow from this step (all subsequent steps will run)"
+        required: false
+        type: choice
+        default: "bump-version"
+        options:
+          - "bump-version"
+          - "merge-develop-to-main"
+
+
+
+           rollback-on-build-failure:
+    needs: [merge-develop-to-main, wait-for-main-pr, build-windows, build-debian, build-arch, build-rhel]
+    if: |
+      ${{
+        always() &&
+        (github.event.inputs.start_from_step == 'bump-version' ||
+         github.event.inputs.start_from_step == 'merge-develop-to-main') &&
+        needs.wait-for-main-pr.result == 'success' &&
+        (needs.build-windows.result == 'failure' ||
+         needs.build-debian.result == 'failure' ||
+         needs.build-arch.result == 'failure' ||
+         needs.build-rhel.result == 'failure')
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Prevent multiple rollback operations from running concurrently
+    concurrency:
+      group: main-branch-rollback
+      cancel-in-progress: false
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rollback merge commit on build failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "::error::One or more build jobs failed - initiating rollback"
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch latest
+          git fetch origin main
+
+          # Get the previous main SHA (before the merge)
+          PREVIOUS_MAIN_SHA="${{ needs.merge-develop-to-main.outputs.previous_main_sha }}"
+          echo "Resetting main to previous commit: $PREVIOUS_MAIN_SHA"
+
+          # Checkout main and reset to previous commit
+          git checkout main
+          git reset --hard "$PREVIOUS_MAIN_SHA"
+
+          # Force push the rollback
+          if ! git push --force origin main; then
+            git notes -m 'release commit could not be rolled back'
+            echo "::error::Failed to push rollback to main"
+            exit 1
+          fi
+          git notes -m 'release commit rolled back'
+          echo "::error::Reset main branch to commit $PREVIOUS_MAIN_SHA"
+          echo "::error::Build failures detected:"
+
+          # Report which builds failed
+          if [ "${{ needs.build-windows.result }}" = "failure" ]; then
+            echo "::error::  - build-windows: FAILED"
+          fi
+          if [ "${{ needs.build-debian.result }}" = "failure" ]; then
+            echo "::error::  - build-debian: FAILED"
+          fi
+          if [ "${{ needs.build-arch.result }}" = "failure" ]; then
+            echo "::error::  - build-arch: FAILED"
+          fi
+          if [ "${{ needs.build-rhel.result }}" = "failure" ]; then
+            echo "::error::  - build-rhel: FAILED"
+          fi
+
+          exit 1
+
+
