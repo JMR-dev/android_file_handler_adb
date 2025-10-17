@@ -929,7 +929,7 @@ jobs:
             pkg_dist_rhel/**
 
   rollback-on-build-failure:
-    needs: [wait-for-main-pr, build-windows, build-debian, build-arch, build-rhel]
+    needs: [merge-develop-to-main, wait-for-main-pr, build-windows, build-debian, build-arch, build-rhel]
     if: |
       ${{
         always() &&
@@ -971,21 +971,21 @@ jobs:
           # Fetch latest
           git fetch origin main
 
-          # Get the merge commit that needs to be reverted
-          MERGE_COMMIT="${{ needs.wait-for-main-pr.outputs.merge_commit_sha }}"
-          echo "Reverting merge commit: $MERGE_COMMIT"
+          # Get the previous main SHA (before the merge)
+          PREVIOUS_MAIN_SHA="${{ needs.merge-develop-to-main.outputs.previous_main_sha }}"
+          echo "Resetting main to previous commit: $PREVIOUS_MAIN_SHA"
 
-          # Checkout main and create revert commit
+          # Checkout main and reset to previous commit
           git checkout main
-          git revert "$MERGE_COMMIT" --no-edit -m 1
+          git reset --hard "$PREVIOUS_MAIN_SHA"
 
-          # Push the revert commit with error handling
-          if ! git push origin main; then
-            echo "::error::Failed to push revert commit"
+          # Force push the rollback
+          if ! git push --force origin main; then
+            echo "::error::Failed to push rollback to main"
             exit 1
           fi
 
-          echo "::error::Reverted merge commit $MERGE_COMMIT on main branch"
+          echo "::error::Reset main branch to commit $PREVIOUS_MAIN_SHA"
           echo "::error::Build failures detected:"
 
           # Report which builds failed
