@@ -135,49 +135,12 @@ jobs:
         with:
           ref: main
 
-      - name: Build executable
+      - name: Build and package Debian
         run: |
           # Container has Poetry and all dependencies pre-installed
+          # Python build script handles both PyInstaller build and fpm packaging
           poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
-
-      - name: Package .deb (fpm)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! VERSION="$(poetry version -s 2>&1)"; then
-            echo "::error::Failed to read version from pyproject.toml"
-            echo "::error::Poetry output: $VERSION"
-            exit 1
-          fi
-          if [ -z "$VERSION" ]; then
-            echo "::error::Version is empty in pyproject.toml"
-            exit 1
-          fi
-          # Validate semver format
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
-            echo "::error::Invalid version format in pyproject.toml: $VERSION"
-            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
-            exit 1
-          fi
-          echo "Using version: $VERSION"
-          PKG_DIR="pkg_dist_debian"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/local/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
-
-          fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
-            --architecture amd64 --deb-user root --deb-group root \
-            --after-install scripts/debian_postinst.sh \
-            -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Import GPG key
         shell: bash
@@ -247,7 +210,7 @@ jobs:
       - name: Pull Docker image
         run: docker pull ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
 
-      - name: Build executable inside container
+      - name: Build and package Arch
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -257,52 +220,6 @@ jobs:
             -e CI_CD=${{ env.CI_CD }} \
             ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
             sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
-
-      - name: Package pacman (fpm) inside container
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e FPM_VERSION=${{ env.FPM_VERSION }} \
-            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
-            sh -c 'set -euo pipefail && \
-            if ! VERSION="$(poetry version -s 2>&1)"; then \
-              echo "::error::Failed to read version from pyproject.toml" >&2 && \
-              echo "::error::Poetry output: $VERSION" >&2 && \
-              exit 1; \
-            fi && \
-            if [ -z "$VERSION" ]; then \
-              echo "::error::Version is empty in pyproject.toml" >&2 && \
-              exit 1; \
-            fi && \
-            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then \
-              echo "::error::Invalid version format in pyproject.toml: $VERSION" >&2 && \
-              echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)" >&2 && \
-              exit 1; \
-            fi && \
-            echo "Using version: $VERSION" && \
-            PKG_DIR="pkg_dist_arch" && \
-            mkdir -p dist && \
-            echo "Packaging from $PKG_DIR" && \
-            ls -la "$PKG_DIR" || true && \
-            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png" && \
-            if [ -f "$ICON_PATH" ]; then \
-              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-                --architecture x86_64 \
-                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
-                -C "$PKG_DIR" \
-                "usr/bin/android-file-handler" \
-                "usr/share/applications/android-file-handler.desktop" \
-                "usr/share/icons/hicolor/256x256/apps/android-file-handler.png"; \
-            else \
-              echo "Note: icon not present, packaging without icon" && \
-              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-                --architecture x86_64 \
-                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
-                -C "$PKG_DIR" \
-                "usr/bin/android-file-handler" \
-                "usr/share/applications/android-file-handler.desktop"; \
-            fi'
 
       - name: Import GPG key
         shell: bash
@@ -367,47 +284,12 @@ jobs:
         with:
           ref: main
 
-      - name: Build RHEL package
+      - name: Build and package RHEL
         run: |
-          set -euo pipefail
           # Container has Poetry and all dependencies pre-installed
+          # Python build script handles both PyInstaller build and fpm packaging
           poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
-
-      - name: Package RHEL (fpm)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! VERSION="$(poetry version -s 2>&1)"; then
-            echo "::error::Failed to read version from pyproject.toml"
-            echo "::error::Poetry output: $VERSION"
-            exit 1
-          fi
-          if [ -z "$VERSION" ]; then
-            echo "::error::Version is empty in pyproject.toml"
-            exit 1
-          fi
-          # Validate semver format
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
-            echo "::error::Invalid version format in pyproject.toml: $VERSION"
-            echo "::error::Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)"
-            exit 1
-          fi
-          echo "Using version: $VERSION"
-          PKG_DIR="pkg_dist_rhel"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR (version=$VERSION)"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
-
-          fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p "dist/android-file-handler-${VERSION}.x86_64.rpm" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Import GPG key
         shell: bash

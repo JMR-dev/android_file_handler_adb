@@ -4,6 +4,7 @@ import os
 import subprocess
 import shutil
 import sys
+import re
 from pathlib import Path
 from enum import Enum
 from typing import List
@@ -35,22 +36,128 @@ def get_distro_config(distro_type: DistroType) -> dict:
             "name": "Debian",
             "bin_path": "usr/local/bin",
             "pkg_suffix": "debian",
-            "spec_file": "scripts/spec_scripts/android-file-handler-debian.spec"
+            "spec_file": "scripts/spec_scripts/android-file-handler-debian.spec",
+            "pkg_type": "deb",
+            "architecture": "amd64",
+            "postinstall": "scripts/debian_postinst.sh"
         },
         DistroType.ARCH: {
             "name": "Arch",
             "bin_path": "usr/bin",
             "pkg_suffix": "arch",
-            "spec_file": "scripts/spec_scripts/android-file-handler-arch.spec"
+            "spec_file": "scripts/spec_scripts/android-file-handler-arch.spec",
+            "pkg_type": "pacman",
+            "architecture": "x86_64",
+            "postinstall": None
         },
         DistroType.RHEL: {
             "name": "RHEL",
-            "bin_path": "usr/bin", 
+            "bin_path": "usr/bin",
             "pkg_suffix": "rhel",
-            "spec_file": "scripts/spec_scripts/android-file-handler-rhel.spec"
+            "spec_file": "scripts/spec_scripts/android-file-handler-rhel.spec",
+            "pkg_type": "rpm",
+            "architecture": "x86_64",
+            "postinstall": "scripts/rhel_postinst.sh"
         }
     }
     return configs[distro_type]
+
+
+def validate_version(version: str) -> bool:
+    """Validate semantic version format."""
+    semver_pattern = r'^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$'
+    return bool(re.match(semver_pattern, version))
+
+
+def get_version() -> str:
+    """Get version from Poetry and validate it."""
+    result = subprocess.run(
+        ["poetry", "version", "-s"],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    version = result.stdout.strip()
+
+    if not version:
+        print("ERROR: Version is empty in pyproject.toml")
+        sys.exit(1)
+
+    if not validate_version(version):
+        print(f"ERROR: Invalid version format in pyproject.toml: {version}")
+        print("Expected semantic version format (e.g., 1.2.3, 1.2.3-beta.1, 1.2.3+build.123)")
+        sys.exit(1)
+
+    return version
+
+
+def package_with_fpm(distro_type: DistroType, version: str, project_root: Path) -> None:
+    """Package the built application using fpm."""
+    config = get_distro_config(distro_type)
+    pkg_dir = project_root / f"pkg_dist_{config['pkg_suffix']}"
+    dist_dir = project_root / "dist"
+
+    print(f"\n=== Packaging {config['name']} with fpm ===")
+
+    # Ensure dist directory exists
+    dist_dir.mkdir(exist_ok=True)
+
+    # Check if icon exists
+    icon_path = pkg_dir / "usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
+    icon_included = icon_path.exists()
+
+    # Build package items list
+    pkg_items = [
+        f"{config['bin_path']}/android-file-handler",
+        "usr/share/applications/android-file-handler.desktop"
+    ]
+
+    if icon_included:
+        pkg_items.append("usr/share/icons/hicolor/256x256/apps/android-file-handler.png")
+    else:
+        print("Note: icon not present, packaging without icon")
+
+    # Build fpm command based on distro type
+    fpm_cmd = [
+        "fpm",
+        "-s", "dir",
+        "-t", config["pkg_type"],
+        "-n", "android-file-handler",
+        "-v", version,
+        "--architecture", config["architecture"],
+        "-C", str(pkg_dir)
+    ]
+
+    # Add distro-specific options
+    if distro_type == DistroType.DEBIAN:
+        output_file = dist_dir / f"android-file-handler_{version}_{config['architecture']}.deb"
+        fpm_cmd.extend([
+            "--deb-user", "root",
+            "--deb-group", "root",
+            "--after-install", config["postinstall"],
+            "-p", str(output_file)
+        ])
+    elif distro_type == DistroType.ARCH:
+        output_file = dist_dir / f"android-file-handler-{version}-1-{config['architecture']}.pkg.tar.zst"
+        fpm_cmd.extend([
+            "-p", str(output_file)
+        ])
+    elif distro_type == DistroType.RHEL:
+        output_file = dist_dir / f"android-file-handler-{version}.{config['architecture']}.rpm"
+        fpm_cmd.extend([
+            "--prefix", "/usr/bin",
+            "--after-install", config["postinstall"],
+            "-p", str(output_file)
+        ])
+
+    # Add package items
+    fpm_cmd.extend(pkg_items)
+
+    # Run fpm
+    print(f"Creating package: {output_file}")
+    run_command(fpm_cmd, working_dir=str(project_root))
+
+    print(f"Package created successfully: {output_file}")
 
 
 def prompt_distro_selection() -> List[DistroType]:
@@ -60,7 +167,7 @@ def prompt_distro_selection() -> List[DistroType]:
     print("2. Arch")
     print("3. RHEL")
     print("4. All distributions")
-    
+
     while True:
         choice = input("Enter choice (1-4): ").strip()
         if choice == "1":
@@ -161,7 +268,7 @@ StartupNotify=true
         pkg_items.append("usr/share/icons/hicolor/256x256/apps/android-file-handler.png")
     
     # Debug listing
-    print(f"Packaging the following items for {config['name']} (relative to {pkg_dir}):")
+    print(f"Prepared items for {config['name']} (relative to {pkg_dir}):")
     for item in pkg_items:
         print(f" - {item}")
         item_path = pkg_dir / item
@@ -170,6 +277,9 @@ StartupNotify=true
             print(f"   {oct(stat.st_mode)[-3:]} {stat.st_size:>8} {item_path}")
         else:
             print(f"   (missing) {item_path}")
+
+    # Package with fpm
+    package_with_fpm(distro_type, version, project_root)
 
 
 def main() -> None:
@@ -211,14 +321,8 @@ def main() -> None:
         run_command(["poetry", "lock"])
         run_command(["poetry", "install"])
     
-    # Get version from Poetry
-    result = subprocess.run(
-        ["poetry", "version", "-s"], 
-        capture_output=True, 
-        text=True, 
-        check=True
-    )
-    version = result.stdout.strip()
+    # Get and validate version from Poetry
+    version = get_version()
     print(f"Version: {version}")
     
     # Build for selected distributions

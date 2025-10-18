@@ -54,8 +54,28 @@ poetry run mypy src/
 
 #### Local Development Build (Linux)
 ```sh
+# Interactive build (prompts for distro selection)
 poetry run python scripts/build_package_linux.py
 ```
+
+#### Docker Compose Build (Recommended for Linux)
+```sh
+# Build all distributions (Debian, Arch, RHEL)
+docker compose up --build
+
+# Build specific distribution
+docker compose up --build debian
+docker compose up --build arch
+docker compose up --build rhel
+
+# Build all in parallel
+docker compose up --build --parallel
+
+# Clean build artifacts
+docker compose down -v && rm -rf dist pkg_dist_* dist_*
+```
+
+See [scripts/docker/README.md](scripts/docker/README.md) for detailed Docker build documentation.
 
 #### Platform-Specific Builds
 ```sh
