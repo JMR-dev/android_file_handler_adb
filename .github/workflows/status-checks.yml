@@ -112,7 +112,7 @@ jobs:
         run: |
           poetry run pytest tests/ -v
 
-  build-windows:
+  build-and-package-windows:
     needs: [run-unit-tests-windows]
     runs-on: windows-latest
     steps:
@@ -155,7 +155,7 @@ jobs:
             dist/**/android-file-handler*.exe
             dist/android-file-handler.exe
 
-  build-debian:
+  build-and-package-debian:
     needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel]
     permissions:
       contents: read
@@ -172,34 +172,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build executable
+      - name: Build and package Debian
         run: |
           # Container has Poetry and all dependencies pre-installed
+          # Python build script handles both PyInstaller build and fpm packaging
           poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
-
-      - name: Package .deb (fpm)
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(poetry version -s)"
-          PKG_DIR="pkg_dist_debian"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/local/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
-
-          fpm -s dir -t deb -n android-file-handler -v "$VERSION" \
-            --architecture amd64 --deb-user root --deb-group root \
-            --after-install scripts/debian_postinst.sh \
-            -p "dist/android-file-handler_${VERSION}_amd64.deb" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload Debian .deb
         uses: actions/upload-artifact@v4
@@ -209,7 +187,7 @@ jobs:
             dist/android-file-handler_*.deb
             pkg_dist_debian/**
 
-  build-arch:
+  build-and-package-arch:
     needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel]
     permissions:
       contents: read
@@ -219,20 +197,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.CI_CD_PAT }}  # Personal Access Token with read:packages
-      
+          password: ${{ secrets.CI_CD_PAT }}
 
       - name: Pull Docker image
         run: docker pull ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
 
-      - name: Build executable inside container
+      - name: Build and package Arch
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -243,38 +220,6 @@ jobs:
             ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
             sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
 
-      - name: Package pacman (fpm) inside container
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e FPM_VERSION=${{ env.FPM_VERSION }} \
-            ghcr.io/jmr-dev/android-file-handler-arch-builder:latest \
-            sh -c 'set -euo pipefail && \
-            VERSION="$(poetry version -s)" && \
-            PKG_DIR="pkg_dist_arch" && \
-            mkdir -p dist && \
-            echo "Packaging from $PKG_DIR" && \
-            ls -la "$PKG_DIR" || true && \
-            ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png" && \
-            if [ -f "$ICON_PATH" ]; then \
-              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-                --architecture x86_64 \
-                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
-                -C "$PKG_DIR" \
-                "usr/bin/android-file-handler" \
-                "usr/share/applications/android-file-handler.desktop" \
-                "usr/share/icons/hicolor/256x256/apps/android-file-handler.png"; \
-            else \
-              echo "Note: icon not present, packaging without icon" && \
-              fpm -s dir -t pacman -n android-file-handler -v "$VERSION" \
-                --architecture x86_64 \
-                -p "dist/android-file-handler-${VERSION}-1-x86_64.pkg.tar.zst" \
-                -C "$PKG_DIR" \
-                "usr/bin/android-file-handler" \
-                "usr/share/applications/android-file-handler.desktop"; \
-            fi'
-
       - name: Upload Arch package
         uses: actions/upload-artifact@v4
         with:
@@ -283,7 +228,7 @@ jobs:
             dist/*.pkg.tar.*
             pkg_dist_arch/**
 
-  build-rhel:
+  build-and-package-rhel:
     needs: [run-unit-tests-debian, run-unit-tests-arch, run-unit-tests-rhel]
     permissions:
       contents: read
@@ -300,32 +245,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build RHEL package
+      - name: Build and package RHEL
         run: |
-          set -euo pipefail
           # Container has Poetry and all dependencies pre-installed
+          # Python build script handles both PyInstaller build and fpm packaging
           poetry install --no-interaction
           poetry run python scripts/build_package_linux.py
-
-      - name: Package RHEL (fpm)
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(poetry version -s)"
-          PKG_DIR="pkg_dist_rhel"
-          mkdir -p dist
-          echo "Packaging from $PKG_DIR (version=$VERSION)"
-          ls -la "$PKG_DIR" || true
-
-          ICON_PATH="$PKG_DIR/usr/share/icons/hicolor/256x256/apps/android-file-handler.png"
-          PKG_ITEMS=( "usr/bin/android-file-handler" "usr/share/applications/android-file-handler.desktop" )
-          if [ -f "$ICON_PATH" ]; then
-            PKG_ITEMS+=( "usr/share/icons/hicolor/256x256/apps/android-file-handler.png" )
-          else
-            echo "Note: icon not present, packaging without icon"
-          fi
-
-          fpm -s dir -t rpm -n android-file-handler -v "$VERSION" --architecture x86_64 --prefix /usr/bin --after-install scripts/rhel_postinst.sh -p "dist/android-file-handler-${VERSION}.x86_64.rpm" -C "$PKG_DIR" "${PKG_ITEMS[@]}"
 
       - name: Upload RHEL artifacts
         uses: actions/upload-artifact@v4
