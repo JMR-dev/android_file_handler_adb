@@ -1,0 +1,72 @@
+# Docker Compose configuration for local multi-platform builds
+# Matches the exact images and configurations from .github/workflows/release.yml
+#
+# Usage:
+#   Build all distributions:     docker-compose up --build
+#   Build specific distro:       docker-compose up --build debian
+#
+# Each service builds a distribution package and outputs to:
+#   - dist/                     - Final packaged files (.deb, .rpm, .pkg.tar.zst)
+#   - pkg_dist_{distro}/        - Staging directory for package contents
+#   - dist_{distro}/            - PyInstaller build output
+
+services:
+  debian:
+    image: ghcr.io/jmr-dev/android-file-handler-debian-builder:debian13-trixie
+    build:
+      context: .
+      dockerfile: scripts/docker/Dockerfile.debian
+      args:
+        FPM_VERSION: "1.16.0"
+    volumes:
+      - .:/workspace
+      # Exclude host .venv to prevent conflicts with container Python
+      - /workspace/.venv
+    working_dir: /workspace
+    environment:
+      - CI_CD=true
+      - DISTRO_TYPE=debian
+      - FPM_VERSION=1.16.0
+      - POETRY_VIRTUALENVS_IN_PROJECT=false
+      - POETRY_VIRTUALENVS_PATH=/tmp/poetry-cache
+    command: sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
+
+  arch:
+    image: ghcr.io/jmr-dev/android-file-handler-arch-builder:latest
+    build:
+      context: .
+      dockerfile: scripts/docker/Dockerfile.arch
+      args:
+        FPM_VERSION: "1.16.0"
+    volumes:
+      - .:/workspace
+      # Exclude host .venv to prevent conflicts with container Python
+      - /workspace/.venv
+    working_dir: /workspace
+    environment:
+      - CI_CD=true
+      - DISTRO_TYPE=arch
+      - FPM_VERSION=1.16.0
+      - POETRY_VIRTUALENVS_IN_PROJECT=false
+      - POETRY_VIRTUALENVS_PATH=/tmp/poetry-cache
+    command: sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
+
+  rhel:
+    image: ghcr.io/jmr-dev/android-file-handler-rhel-builder:fedora42
+    build:
+      context: .
+      dockerfile: scripts/docker/Dockerfile.rhel
+      args:
+        FPM_VERSION: "1.16.0"
+    volumes:
+      - .:/workspace
+      # Exclude host .venv to prevent conflicts with container Python
+      - /workspace/.venv
+    working_dir: /workspace
+    environment:
+      - CI_CD=true
+      - DISTRO_TYPE=rhel
+      - FPM_VERSION=1.16.0
+      - POETRY_VIRTUALENVS_IN_PROJECT=false
+      - POETRY_VIRTUALENVS_PATH=/tmp/poetry-cache
+    command: sh -c "poetry install --no-interaction && poetry run python scripts/build_package_linux.py"
