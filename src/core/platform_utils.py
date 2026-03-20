@@ -10,7 +10,7 @@ from typing import Optional
 
 def get_executable_directory() -> str:
     """Get the directory containing the executable or script."""
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # Running as executable (PyInstaller, cx_Freeze, etc.)
         return os.path.dirname(sys.executable)
     else:
@@ -21,14 +21,14 @@ def get_executable_directory() -> str:
 def get_platform_tools_directory() -> str:
     """Get platform-tools directory."""
     base_dir = get_executable_directory()
-    
+
     # Check if we're in development mode (running from src/ directory)
-    if not getattr(sys, 'frozen', False):
+    if not getattr(sys, "frozen", False):
         # Running as script - check if we're in src/ directory or subdirectory
-        if base_dir.endswith('src'):
+        if base_dir.endswith("src"):
             # Already in src directory - place platform-tools here
             return os.path.join(base_dir, "platform-tools")
-        elif base_dir.endswith('gui') or os.path.basename(base_dir) in ['gui']:
+        elif base_dir.endswith("gui") or os.path.basename(base_dir) in ["gui"]:
             # In src/gui subdirectory - go up one level to src
             src_dir = os.path.dirname(base_dir)
             return os.path.join(src_dir, "platform-tools")
@@ -42,7 +42,7 @@ def get_platform_tools_directory() -> str:
             else:
                 # Fallback to current directory
                 return os.path.join(base_dir, "src", "platform-tools")
-    
+
     # Running as executable - use directory next to binary
     return os.path.join(base_dir, "platform-tools")
 

@@ -11,8 +11,12 @@ import shutil
 import tempfile
 from typing import Optional
 
-from .platform_utils import get_adb_binary_name, get_platform_tools_directory, is_windows, is_linux
-
+from .platform_utils import (
+    get_adb_binary_name,
+    get_platform_tools_directory,
+    is_windows,
+    is_linux,
+)
 
 # Constants for download URLs
 ADB_WIN_ZIP_URL = (
@@ -43,11 +47,15 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
 
     # Determine base data dir
     if user_data_dir:
-        data_root = os.path.join(user_data_dir("android-file-handler"), "platform-tools")
+        data_root = os.path.join(
+            user_data_dir("android-file-handler"), "platform-tools"
+        )
     else:
         # Fallback: use home-based location
         home = os.path.expanduser("~")
-        data_root = os.path.join(home, ".local", "share", "android-file-handler", "platform-tools")
+        data_root = os.path.join(
+            home, ".local", "share", "android-file-handler", "platform-tools"
+        )
 
     os.makedirs(data_root, exist_ok=True)
 
@@ -102,8 +110,12 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
             raise RuntimeError(f"Redirect to untrusted domain: {resp.url}")
 
         # Check Content-Type to ensure we're getting a zip file
-        content_type = resp.headers.get('Content-Type', '')
-        if content_type and 'zip' not in content_type.lower() and 'octet-stream' not in content_type.lower():
+        content_type = resp.headers.get("Content-Type", "")
+        if (
+            content_type
+            and "zip" not in content_type.lower()
+            and "octet-stream" not in content_type.lower()
+        ):
             raise RuntimeError(f"Unexpected content type: {content_type}")
 
         zip_path = os.path.join(tmp_dir, "platform-tools.zip")
@@ -137,10 +149,17 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
                 tmp_dir_normalized = os.path.normpath(tmp_dir)
 
                 # Ensure tmp_dir has a trailing separator for proper prefix matching
-                tmp_dir_with_sep = tmp_dir_normalized if tmp_dir_normalized.endswith(os.sep) else tmp_dir_normalized + os.sep
+                tmp_dir_with_sep = (
+                    tmp_dir_normalized
+                    if tmp_dir_normalized.endswith(os.sep)
+                    else tmp_dir_normalized + os.sep
+                )
 
                 # Check if normalized path is within tmp_dir
-                if not (normalized.startswith(tmp_dir_with_sep) or normalized == tmp_dir_normalized):
+                if not (
+                    normalized.startswith(tmp_dir_with_sep)
+                    or normalized == tmp_dir_normalized
+                ):
                     raise RuntimeError(f"Zip contains path traversal: {info.filename}")
 
             zf.extractall(tmp_dir)
@@ -151,7 +170,9 @@ def ensure_platform_tools_in_user_dir(version_tag: Optional[str] = "latest") -> 
             # try to find a platform-tools directory inside temp
             for entry in os.listdir(tmp_dir):
                 candidate = os.path.join(tmp_dir, entry)
-                if os.path.isdir(candidate) and entry.lower().startswith("platform-tools"):
+                if os.path.isdir(candidate) and entry.lower().startswith(
+                    "platform-tools"
+                ):
                     extracted_dir = candidate
                     break
 
@@ -212,7 +233,8 @@ def get_adb_binary_path() -> str:
     # Legacy pathway: some tests patch ensure_platform_tools_in_user_dir via adb_manager module
     try:
         from . import adb_manager as _adb_manager  # type: ignore
-        if hasattr(_adb_manager, 'ensure_platform_tools_in_user_dir'):
+
+        if hasattr(_adb_manager, "ensure_platform_tools_in_user_dir"):
             adb_path = _adb_manager.ensure_platform_tools_in_user_dir()
             if adb_path and os.path.isfile(adb_path):
                 return adb_path

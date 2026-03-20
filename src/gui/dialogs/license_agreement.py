@@ -116,7 +116,9 @@ def resource_path(relative_path: str) -> str:
             base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return os.path.normpath(os.path.join(base, relative_path))
     except Exception:
-        return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path))
+        return os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+        )
 
 
 def run_windows_first_run_if_needed() -> None:
@@ -136,7 +138,11 @@ def run_windows_first_run_if_needed() -> None:
         if not os.path.exists(script_path):
             return
         try:
-            subprocess.Popen(["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             pass
     except Exception:
@@ -156,106 +162,104 @@ class LicenseAgreementFrame(tk.Frame):
         super().__init__(parent)
         self.on_agree_callback = on_agree_callback
         self.setup_ui()
-    
+
     def setup_ui(self):
         """Setup the license agreement UI."""
         # Configure the frame to fill the window
         self.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-        
+
         # Header
         header_label = tk.Label(
-            self, 
-            text="License Agreement", 
-            font=("Arial", 16, "bold")
+            self, text="License Agreement", font=("Arial", 16, "bold")
         )
         header_label.pack(pady=(0, 10))
-        
+
         # Instruction
         instruction_label = tk.Label(
-            self, 
+            self,
             text="Please read and accept the license agreement to continue using Android File Handler:",
             font=("Arial", 10),
-            wraplength=500
+            wraplength=500,
         )
         instruction_label.pack(pady=(0, 15))
-        
+
         # License text area
         text_frame = tk.Frame(self)
         text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
-        
+
         self.license_text = scrolledtext.ScrolledText(
-            text_frame, 
-            wrap=tk.WORD, 
-            width=80, 
+            text_frame,
+            wrap=tk.WORD,
+            width=80,
             height=20,
             font=("Courier", 9),
             state=tk.DISABLED,
             bg="#f8f8f8",
             relief=tk.SUNKEN,
-            bd=2
+            bd=2,
         )
         self.license_text.pack(fill=tk.BOTH, expand=True)
-        
+
         # Insert license text
         self.license_text.config(state=tk.NORMAL)
         self.license_text.insert(tk.END, get_mit_license_text())
         self.license_text.config(state=tk.DISABLED)
-        
+
         # Button frame
         button_frame = tk.Frame(self)
         button_frame.pack(fill=tk.X, pady=(10, 0))
-        
+
         # Buttons
         self.agree_btn = tk.Button(
-            button_frame, 
-            text="I Agree", 
+            button_frame,
+            text="I Agree",
             command=self.on_agree,
             bg="#4CAF50",
-            fg="white", 
+            fg="white",
             font=("Arial", 11, "bold"),
             width=15,
-            height=2
+            height=2,
         )
         self.agree_btn.pack(side=tk.LEFT)
-        
+
         self.disagree_btn = tk.Button(
-            button_frame, 
-            text="Disagree & Exit", 
+            button_frame,
+            text="Disagree & Exit",
             command=self.on_disagree,
             bg="#ff6b6b",
             fg="white",
             font=("Arial", 11, "bold"),
             width=15,
-            height=2
+            height=2,
         )
         self.disagree_btn.pack(side=tk.RIGHT)
-        
+
         # Center text
         center_label = tk.Label(
             button_frame,
             text="You must agree to the license terms to use this software",
             font=("Arial", 9),
-            fg="#666666"
+            fg="#666666",
         )
         center_label.pack(expand=True)
-    
+
     def on_agree(self):
         """Handle user clicking Agree."""
         if save_license_agreement():
             self.on_agree_callback()
         else:
             messagebox.showerror(
-                "Error", 
-                "Could not save license agreement. Please check file permissions and try again."
+                "Error",
+                "Could not save license agreement. Please check file permissions and try again.",
             )
-    
+
     def on_disagree(self):
         """Handle user clicking Disagree."""
         # Ask for confirmation
         result = messagebox.askyesno(
             "Exit Application",
             "Are you sure you want to exit? You must agree to the license terms to use this software.",
-            icon="warning"
+            icon="warning",
         )
         if result:
             sys.exit(0)

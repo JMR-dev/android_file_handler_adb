@@ -28,7 +28,7 @@ class TestSanitizePathComponent:
 
     def test_dangerous_chars(self):
         """Test that dangerous characters are rejected."""
-        dangerous_chars = [';', '|', '&', '$', '`', '\n', '\r', '>', '<', '(', ')']
+        dangerous_chars = [";", "|", "&", "$", "`", "\n", "\r", ">", "<", "(", ")"]
         for char in dangerous_chars:
             with pytest.raises(ValueError, match="dangerous character"):
                 sanitize_path_component(f"file{char}name.txt")
@@ -60,8 +60,14 @@ class TestSanitizeAndroidPath:
 
     def test_path_with_spaces(self):
         """Test that paths with spaces are allowed."""
-        assert sanitize_android_path("/sdcard/My Photos/vacation.jpg") == "/sdcard/My Photos/vacation.jpg"
-        assert sanitize_android_path("/sdcard/DCIM/Camera Roll/IMG_001.jpg") == "/sdcard/DCIM/Camera Roll/IMG_001.jpg"
+        assert (
+            sanitize_android_path("/sdcard/My Photos/vacation.jpg")
+            == "/sdcard/My Photos/vacation.jpg"
+        )
+        assert (
+            sanitize_android_path("/sdcard/DCIM/Camera Roll/IMG_001.jpg")
+            == "/sdcard/DCIM/Camera Roll/IMG_001.jpg"
+        )
 
     def test_empty_path(self):
         """Test that empty paths are rejected."""
@@ -150,6 +156,7 @@ class TestSanitizeLocalPath:
     def test_existing_path_resolves_symlinks(self):
         """Test that existing paths still resolve symlinks."""
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a real directory
             real_dir = os.path.join(tmpdir, "real")
@@ -168,6 +175,7 @@ class TestSanitizeLocalPath:
     def test_nonexistent_path_strict_mode(self):
         """Test that strict mode (allow_nonexistent=False) works for existing paths."""
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # Test with existing directory
             result = sanitize_local_path(tmpdir, allow_nonexistent=False)
@@ -190,7 +198,7 @@ class TestValidateDeviceId:
 
     def test_invalid_characters(self):
         """Test that invalid characters are rejected."""
-        dangerous_chars = [';', '|', '&', '$', '`', '\n', '\r', ' ', '>', '<']
+        dangerous_chars = [";", "|", "&", "$", "`", "\n", "\r", " ", ">", "<"]
         for char in dangerous_chars:
             with pytest.raises(ValueError):
                 validate_device_id(f"device{char}123")
@@ -222,6 +230,7 @@ class TestSecurityIntegration:
     def test_symlink_attack_prevention(self):
         """Test that symlink-based path traversal is blocked."""
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a base directory
             base_dir = os.path.join(tmpdir, "safe")
@@ -293,6 +302,7 @@ class TestUnicodeAndEdgeCases:
     def test_local_path_windows_style(self):
         """Test that Windows-style paths are normalized correctly."""
         import platform
+
         if platform.system() == "Windows":
             # Windows paths should be normalized
             result = sanitize_local_path("C:\\Users\\Test\\Documents")
@@ -307,6 +317,7 @@ class TestUnicodeAndEdgeCases:
     def test_local_path_with_mixed_separators(self):
         """Test that paths with mixed separators are normalized."""
         import platform
+
         if platform.system() == "Windows":
             # Windows should handle mixed separators
             mixed_path = "C:/Users\\Test/Documents"

@@ -13,11 +13,13 @@ from .platform_tools import get_adb_binary_path
 
 class ADBCommandRunner:
     """Handles ADB command execution and device communication."""
-    
+
     def __init__(self):
         self.current_process: Optional[subprocess.Popen] = None
-    
-    def run_adb_command(self, args: list, capture_output: bool = True) -> Union[Tuple[str, str, int], subprocess.Popen, Tuple[None, str, int]]:
+
+    def run_adb_command(
+        self, args: list, capture_output: bool = True
+    ) -> Union[Tuple[str, str, int], subprocess.Popen, Tuple[None, str, int]]:
         """Run an ADB command and return output."""
         cmd = [get_adb_binary_path()] + args
         try:
@@ -34,7 +36,7 @@ class ADBCommandRunner:
                 return None, str(e), -1
             else:
                 return None
-    
+
     def check_device(self) -> Optional[str]:
         """Check if an Android device is connected."""
         result = self.run_adb_command(["devices"], capture_output=True)
@@ -46,7 +48,7 @@ class ADBCommandRunner:
                 if line.endswith("\tdevice"):
                     return line.split()[0]
         return None
-    
+
     def parse_progress(self, text_line: str) -> Optional[int]:
         """Parse progress percentage from ADB output.
 
@@ -121,7 +123,7 @@ class ADBCommandRunner:
             return 100
 
         return None
-    
+
     def cancel_current_operation(self) -> bool:
         """Cancel the current ADB operation.
 
@@ -149,7 +151,7 @@ class ADBCommandRunner:
                     # Force kill if it doesn't terminate gracefully
                     self.current_process.kill()
                     self.current_process.wait()
-                
+
                 self.current_process = None
                 return True
             except Exception:

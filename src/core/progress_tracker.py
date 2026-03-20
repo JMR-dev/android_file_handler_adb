@@ -22,9 +22,9 @@ class ProgressTracker:
         self.current_speed: float = 0.0
         self.estimated_time_remaining: int = 0
         self.transfer_progress: Dict[str, int] = {
-            'current_file': 0,
-            'total_files': 0,
-            'files_to_transfer': 0
+            "current_file": 0,
+            "total_files": 0,
+            "files_to_transfer": 0,
         }
 
     def set_progress_callback(self, callback: Callable[[int], None]) -> None:
@@ -84,8 +84,8 @@ class ProgressTracker:
 
     def update_transfer_progress(self, current_file: int, total_files: int) -> None:
         """Update transfer progress for file counting."""
-        self.transfer_progress['current_file'] = current_file
-        self.transfer_progress['total_files'] = total_files
+        self.transfer_progress["current_file"] = current_file
+        self.transfer_progress["total_files"] = total_files
         # Send progress update through status callback with special format
         progress_message = f"TRANSFER_PROGRESS:{current_file}:{total_files}"
         if self.status_callback:
@@ -94,14 +94,14 @@ class ProgressTracker:
     def reset_transfer_progress(self) -> None:
         """Reset transfer progress counters."""
         self.transfer_progress = {
-            'current_file': 0,
-            'total_files': 0,
-            'files_to_transfer': 0
+            "current_file": 0,
+            "total_files": 0,
+            "files_to_transfer": 0,
         }
 
     def set_files_to_transfer(self, count: int) -> None:
         """Set the total number of files to transfer."""
-        self.transfer_progress['files_to_transfer'] = count
+        self.transfer_progress["files_to_transfer"] = count
 
     # Utilities expected by tests/UI
     def get_progress_percentage(self) -> float:
@@ -153,38 +153,48 @@ class ProgressTracker:
 
 class TransferProgressEstimator:
     """Estimates transfer progress based on various factors."""
-    
+
     @staticmethod
-    def estimate_progress_from_time(start_time: float, last_progress: int, 
-                                  elapsed_threshold: float = 1.0, 
-                                  max_increment: int = 20,
-                                  max_progress: int = 90) -> Optional[int]:
+    def estimate_progress_from_time(
+        start_time: float,
+        last_progress: int,
+        elapsed_threshold: float = 1.0,
+        max_increment: int = 20,
+        max_progress: int = 90,
+    ) -> Optional[int]:
         """Estimate progress based on elapsed time."""
         current_time = time.time()
         elapsed_time = current_time - start_time
-        
+
         if elapsed_time >= elapsed_threshold and last_progress < max_progress:
             new_progress = min(last_progress + max_increment, max_progress)
             return int(new_progress)
-        
+
         return None
-    
+
     @staticmethod
-    def estimate_progress_from_activity(line_count: int, last_progress: int,
-                                      activity_threshold: int = 50,
-                                      increment: int = 5,
-                                      max_progress: int = 90) -> Optional[int]:
+    def estimate_progress_from_activity(
+        line_count: int,
+        last_progress: int,
+        activity_threshold: int = 50,
+        increment: int = 5,
+        max_progress: int = 90,
+    ) -> Optional[int]:
         """Estimate progress based on output line activity."""
         if line_count % activity_threshold == 0 and last_progress < max_progress:
-            calculated_increment = max(1, min(increment, max_progress // (line_count // activity_threshold + 1)))
+            calculated_increment = max(
+                1,
+                min(increment, max_progress // (line_count // activity_threshold + 1)),
+            )
             new_progress = min(last_progress + calculated_increment, max_progress)
             return int(new_progress)
-        
+
         return None
-    
+
     @staticmethod
-    def estimate_complex_progress(line_count: int, elapsed_time: float, 
-                                last_progress: int) -> Optional[int]:
+    def estimate_complex_progress(
+        line_count: int, elapsed_time: float, last_progress: int
+    ) -> Optional[int]:
         """Estimate progress using complex algorithm for large transfers."""
         if elapsed_time >= 2.0 and last_progress < 95:
             if line_count > 100:
@@ -193,7 +203,7 @@ class TransferProgressEstimator:
                 new_progress = min(activity_factor + time_factor, 95)
             else:
                 new_progress = min(last_progress + 10, 95)
-            
+
             return int(new_progress)
-        
+
         return None

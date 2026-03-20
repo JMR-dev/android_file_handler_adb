@@ -12,10 +12,10 @@ from typing import Optional, Tuple, Callable
 
 # Import our modular components
 from .platform_tools import (
-    ensure_platform_tools_in_user_dir, 
-    get_adb_binary_path, 
+    ensure_platform_tools_in_user_dir,
+    get_adb_binary_path,
     is_adb_available,
-    download_and_extract_adb
+    download_and_extract_adb,
 )
 from .platform_utils import get_platform_tools_directory, get_platform_type
 from .file_transfer import ADBFileTransfer
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 class ADBManager:
     """Main interface for ADB operations, device management, and file transfers."""
-    
+
     def __init__(self):
         """Initialize the ADB manager."""
         self.command_runner = ADBCommandRunner()
@@ -53,19 +53,19 @@ class ADBManager:
             self.deduplicator = FileDeduplicator()
         except Exception:
             self.deduplicator = None
-        
+
         # Progress and status callbacks for compatibility
         self.progress_callback = None
         self.status_callback = None
-        
+
         # Transfer progress tracking
         self.transfer_progress = {
-            'current_file': 0,
-            'total_files': 0,
-            'transferred_bytes': 0,
-            'total_bytes': 0
+            "current_file": 0,
+            "total_files": 0,
+            "transferred_bytes": 0,
+            "total_bytes": 0,
         }
-        
+
         # Lazily initialize ADB binary path to reduce side effects during init
         self._adb_path: Optional[str] = None
 
@@ -81,68 +81,70 @@ class ADBManager:
     @adb_path.setter
     def adb_path(self, value: Optional[str]) -> None:
         self._adb_path = value
-    
+
     def is_available(self) -> bool:
         """Check if ADB is available."""
         return is_adb_available()
-    
+
     def ensure_adb_installed(self) -> bool:
         """Ensure ADB is installed and available."""
         try:
             if self.is_available():
                 return True
-            
+
             # Try to download and install ADB
             self.adb_path = ensure_platform_tools_in_user_dir()
             if self.adb_path and os.path.exists(self.adb_path):
                 return True
-                
+
         except Exception as e:
             print(f"Error ensuring ADB installation: {e}")
-            
+
         return False
-    
+
     def get_devices(self) -> list[str]:
         """Get list of connected Android devices."""
         try:
             args = ["devices"]
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
-            
+
             if returncode != 0:
                 return []
-            
+
             devices = []
-            for line in stdout.split('\n')[1:]:  # Skip first line "List of devices attached"
+            for line in stdout.split("\n")[
+                1:
+            ]:  # Skip first line "List of devices attached"
                 line = line.strip()
-                if line and '\t' in line:
-                    device_id = line.split('\t')[0]
+                if line and "\t" in line:
+                    device_id = line.split("\t")[0]
                     if device_id:
                         devices.append(device_id)
-            
+
             return devices
         except Exception:
             return []
-    
+
     def is_device_connected(self, device_id: Optional[str] = None) -> bool:
         """Check if a specific device is connected."""
         devices = self.get_devices()
         if not devices:
             return False
-            
+
         if device_id:
             return device_id in devices
         else:
             # Check if any device is connected
             return len(devices) > 0
-    
+
     def select_device(self, device_id: str) -> None:
         """Select a specific device for operations."""
         self.selected_device = device_id
-    
+
     def get_selected_device(self) -> Optional[str]:
         """Get the currently selected device."""
         return self.selected_device
-    
+
     def list_files(self, path: str, device_id: Optional[str] = None) -> list[dict]:
         """List files in the specified path on the device."""
         # Sanitize inputs to prevent command injection
@@ -174,58 +176,64 @@ class ADBManager:
                 return []
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
-        
+
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
             if returncode != 0:
                 return []
-            
+
             files = []
-            for line in stdout.split('\n'):
+            for line in stdout.split("\n"):
                 line = line.strip()
-                if not line or line.startswith('total '):
+                if not line or line.startswith("total "):
                     continue
-                    
+
                 # Parse ls -la output
                 parts = line.split()
                 if len(parts) < 9:
                     continue
-                    
+
                 permissions = parts[0]
                 size_str = parts[4]
-                
+
                 # Join filename parts (handles spaces in filenames)
-                name = ' '.join(parts[8:])
-                
+                name = " ".join(parts[8:])
+
                 # Skip current and parent directory entries
-                if name in ['.', '..']:
+                if name in [".", ".."]:
                     continue
-                
-                file_type = 'folder' if permissions.startswith('d') else 'file'
-                
+
+                file_type = "folder" if permissions.startswith("d") else "file"
+
                 try:
-                    size = int(size_str) if file_type == 'file' else 0
+                    size = int(size_str) if file_type == "file" else 0
                 except ValueError:
                     size = 0
-                
+
                 # Combine date and time parts
-                modified = ' '.join(parts[5:8]) if len(parts) >= 8 else ''
-                
-                files.append({
-                    'name': name,
-                    'type': file_type,
-                    'size': size,
-                    'permissions': permissions,
-                    'modified': modified
-                })
-            
+                modified = " ".join(parts[5:8]) if len(parts) >= 8 else ""
+
+                files.append(
+                    {
+                        "name": name,
+                        "type": file_type,
+                        "size": size,
+                        "permissions": permissions,
+                        "modified": modified,
+                    }
+                )
+
             return files
         except Exception:
             return []
-    
-    def pull_file(self, remote_path: str, local_path: str,
-                  progress_callback: Optional[Callable[[int, int], None]] = None,
-                  device_id: Optional[str] = None) -> Tuple[bool, str]:
+
+    def pull_file(
+        self,
+        remote_path: str,
+        local_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        device_id: Optional[str] = None,
+    ) -> Tuple[bool, str]:
         """Pull a file from device to local system."""
         try:
             # Create local directory if it doesn't exist
@@ -236,7 +244,7 @@ class ADBManager:
                 except Exception:
                     # Normalize error message for tests
                     return False, "Failed to pull file"
-            
+
             # Use our file transfer module
             success = self.file_transfer.pull_file(remote_path, local_path)
             if success:
@@ -245,10 +253,14 @@ class ADBManager:
                 return False, "Failed to pull file"
         except Exception as e:
             return False, "Failed to pull file"
-    
-    def pull_folder(self, remote_path: str, local_path: str,
-                    progress_callback: Optional[Callable[[int, int], None]] = None,
-                    device_id: Optional[str] = None) -> Tuple[bool, str]:
+
+    def pull_folder(
+        self,
+        remote_path: str,
+        local_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        device_id: Optional[str] = None,
+    ) -> Tuple[bool, str]:
         """Pull a folder from device to local system."""
         try:
             # Create local directory
@@ -256,7 +268,7 @@ class ADBManager:
                 os.makedirs(local_path, exist_ok=True)
             except Exception:
                 return False, "Failed to pull folder"
-            
+
             # Use our file transfer module
             success = self.file_transfer.pull_folder(remote_path, local_path)
             if success:
@@ -265,15 +277,19 @@ class ADBManager:
                 return False, "Failed to pull folder"
         except Exception as e:
             return False, "Failed to pull folder"
-    
-    def push_file(self, local_path: str, remote_path: str,
-                  progress_callback: Optional[Callable[[int, int], None]] = None,
-                  device_id: Optional[str] = None) -> Tuple[bool, str]:
+
+    def push_file(
+        self,
+        local_path: str,
+        remote_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        device_id: Optional[str] = None,
+    ) -> Tuple[bool, str]:
         """Push a file from local system to device."""
         try:
             if not os.path.exists(local_path):
                 return False, f"Local file not found: {local_path}"
-            
+
             # Use our file transfer module
             success = self.file_transfer.push_file(local_path, remote_path)
             if success:
@@ -282,15 +298,19 @@ class ADBManager:
                 return False, "Failed to push file"
         except Exception as e:
             return False, f"Error pushing file: {str(e)}"
-    
-    def push_folder(self, local_path: str, remote_path: str,
-                    progress_callback: Optional[Callable[[int, int], None]] = None,
-                    device_id: Optional[str] = None) -> Tuple[bool, str]:
+
+    def push_folder(
+        self,
+        local_path: str,
+        remote_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        device_id: Optional[str] = None,
+    ) -> Tuple[bool, str]:
         """Push a folder from local system to device."""
         try:
             if not os.path.exists(local_path):
                 return False, f"Local folder not found: {local_path}"
-            
+
             # Use our file transfer module
             success = self.file_transfer.push_folder(local_path, remote_path)
             if success:
@@ -299,8 +319,10 @@ class ADBManager:
                 return False, "Failed to push folder"
         except Exception as e:
             return False, f"Error pushing folder: {str(e)}"
-    
-    def delete_file(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
+
+    def delete_file(
+        self, remote_path: str, device_id: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """Delete a file on the device."""
         # Sanitize inputs to prevent command injection
         try:
@@ -328,7 +350,9 @@ class ADBManager:
         except Exception as e:
             return False, f"Error deleting file: {str(e)}"
 
-    def create_folder(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
+    def create_folder(
+        self, remote_path: str, device_id: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """Create a folder on the device."""
         # Sanitize inputs to prevent command injection
         try:
@@ -356,7 +380,9 @@ class ADBManager:
         except Exception as e:
             return False, f"Error creating folder: {str(e)}"
 
-    def delete_folder(self, remote_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
+    def delete_folder(
+        self, remote_path: str, device_id: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """Delete a folder on the device."""
         # Sanitize inputs to prevent command injection
         try:
@@ -384,7 +410,9 @@ class ADBManager:
         except Exception as e:
             return False, f"Error deleting folder: {str(e)}"
 
-    def move_item(self, old_path: str, new_path: str, device_id: Optional[str] = None) -> Tuple[bool, str]:
+    def move_item(
+        self, old_path: str, new_path: str, device_id: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """Move/rename a file or folder on the device."""
         # Sanitize inputs to prevent command injection
         try:
@@ -413,7 +441,9 @@ class ADBManager:
         except Exception as e:
             return False, f"Error moving item: {str(e)}"
 
-    def get_file_info(self, remote_path: str, device_id: Optional[str] = None) -> Optional[dict]:
+    def get_file_info(
+        self, remote_path: str, device_id: Optional[str] = None
+    ) -> Optional[dict]:
         """Get information about a file or folder on the device."""
         # Sanitize inputs to prevent command injection
         try:
@@ -443,50 +473,54 @@ class ADBManager:
                 return None
 
         args = device_args + ["shell", "ls", "-la", sanitized_path]
-        
+
         try:
             stdout, stderr, returncode = self.command_runner.run_adb_command(args)
             if returncode != 0:
                 return None
-            
-            lines = stdout.strip().split('\n')
+
+            lines = stdout.strip().split("\n")
             if not lines:
                 return None
-            
+
             # Parse the first non-empty line (should be the file info)
             for line in lines:
                 line = line.strip()
-                if line and not line.startswith('total '):
+                if line and not line.startswith("total "):
                     parts = line.split()
                     if len(parts) >= 9:
                         permissions = parts[0]
                         size_str = parts[4]
-                        name = ' '.join(parts[8:])
-                        
-                        file_type = 'folder' if permissions.startswith('d') else 'file'
-                        
+                        name = " ".join(parts[8:])
+
+                        file_type = "folder" if permissions.startswith("d") else "file"
+
                         try:
-                            size = int(size_str) if file_type == 'file' else 0
+                            size = int(size_str) if file_type == "file" else 0
                         except ValueError:
                             size = 0
-                        
-                        modified = ' '.join(parts[5:8]) if len(parts) >= 8 else ''
-                        
+
+                        modified = " ".join(parts[5:8]) if len(parts) >= 8 else ""
+
                         return {
-                            'name': name,
-                            'type': file_type,
-                            'size': size,
-                            'permissions': permissions,
-                            'modified': modified
+                            "name": name,
+                            "type": file_type,
+                            "size": size,
+                            "permissions": permissions,
+                            "modified": modified,
                         }
-            
+
             return None
         except Exception:
             return None
-    
-    def pull_folder_with_dedup(self, remote_path: str, local_path: str,
-                              progress_callback: Optional[Callable[[int, int], None]] = None,
-                              device_id: Optional[str] = None) -> Tuple[bool, Optional[dict]]:
+
+    def pull_folder_with_dedup(
+        self,
+        remote_path: str,
+        local_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        device_id: Optional[str] = None,
+    ) -> Tuple[bool, Optional[dict]]:
         """Pull a folder from device with deduplication support.
 
         Args:
@@ -500,13 +534,19 @@ class ADBManager:
         """
         # For now, just call the regular pull_folder
         # TODO: Implement actual deduplication logic
-        success, message = self.pull_folder(remote_path, local_path, progress_callback, device_id)
-        stats = {'message': message} if success else None
+        success, message = self.pull_folder(
+            remote_path, local_path, progress_callback, device_id
+        )
+        stats = {"message": message} if success else None
         return success, stats
 
-    def push_folder_with_dedup(self, local_path: str, remote_path: str,
-                              progress_callback: Optional[Callable[[int, int], None]] = None,
-                              device_id: Optional[str] = None) -> Tuple[bool, Optional[dict]]:
+    def push_folder_with_dedup(
+        self,
+        local_path: str,
+        remote_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        device_id: Optional[str] = None,
+    ) -> Tuple[bool, Optional[dict]]:
         """Push a folder to device with deduplication support.
 
         Args:
@@ -520,11 +560,17 @@ class ADBManager:
         """
         # For now, just call the regular push_folder
         # TODO: Implement actual deduplication logic
-        success, message = self.push_folder(local_path, remote_path, progress_callback, device_id)
-        stats = {'message': message} if success else None
+        success, message = self.push_folder(
+            local_path, remote_path, progress_callback, device_id
+        )
+        stats = {"message": message} if success else None
         return success, stats
 
-    def deduplicate_files(self, folder_path: str, progress_callback: Optional[Callable[[str], None]] = None) -> Tuple[int, list]:
+    def deduplicate_files(
+        self,
+        folder_path: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[int, list]:
         """Find and optionally remove duplicate files in a folder."""
         deduplicator = FileDeduplicator()
 
@@ -564,15 +610,15 @@ class ADBManager:
             self.status_callback(message)
 
     def _update_transfer_progress(self, current_file: int, total_files: int) -> None:
-        self.transfer_progress['current_file'] = current_file
-        self.transfer_progress['total_files'] = total_files
+        self.transfer_progress["current_file"] = current_file
+        self.transfer_progress["total_files"] = total_files
         if self.status_callback:
             self.status_callback(f"TRANSFER_PROGRESS:{current_file}:{total_files}")
 
     def _reset_transfer_progress(self) -> None:
-        self.transfer_progress['current_file'] = 0
-        self.transfer_progress['total_files'] = 0
-        self.transfer_progress['files_to_transfer'] = 0
+        self.transfer_progress["current_file"] = 0
+        self.transfer_progress["total_files"] = 0
+        self.transfer_progress["files_to_transfer"] = 0
 
     def check_local_disk_space(self) -> bool:
         tools_dir = get_platform_tools_directory()
@@ -589,7 +635,9 @@ class ADBManager:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                 return p.stdout, p.stderr, p.returncode
             else:
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                p = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
                 self.current_process = p
                 return p
         except Exception as e:
@@ -598,7 +646,7 @@ class ADBManager:
             return None
 
     def check_device(self) -> Optional[str]:
-        out, err, rc = self.run_adb_command(['devices'], capture_output=True)
+        out, err, rc = self.run_adb_command(["devices"], capture_output=True)
         if rc != 0 or not out:
             return None
         for line in str(out).splitlines():

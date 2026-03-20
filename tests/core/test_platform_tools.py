@@ -8,10 +8,10 @@ from unittest.mock import Mock, patch, mock_open, MagicMock
 import pytest
 
 from src.core.platform_tools import (
-    is_adb_available, 
+    is_adb_available,
     get_adb_binary_path,
     ensure_platform_tools_in_user_dir,
-    download_and_extract_adb
+    download_and_extract_adb,
 )
 
 
@@ -20,112 +20,159 @@ class TestPlatformTools(unittest.TestCase):
 
     def test_is_adb_available_true(self):
         """Test adb availability when binary exists."""
-        with patch('src.core.platform_tools.get_adb_binary_path', return_value='/path/to/adb'):
-            with patch('os.path.isfile', return_value=True):
+        with patch(
+            "src.core.platform_tools.get_adb_binary_path", return_value="/path/to/adb"
+        ):
+            with patch("os.path.isfile", return_value=True):
                 result = is_adb_available()
                 assert result is True
 
     def test_is_adb_available_false(self):
         """Test adb availability when binary doesn't exist."""
-        with patch('src.core.platform_tools.get_adb_binary_path', return_value=None):
+        with patch("src.core.platform_tools.get_adb_binary_path", return_value=None):
             result = is_adb_available()
             assert result is False
 
     def test_get_adb_binary_path_user_dir_success(self):
         """Test getting ADB path from user directory."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', return_value='/user/adb'):
-            with patch('os.path.isfile', return_value=True):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            return_value="/user/adb",
+        ):
+            with patch("os.path.isfile", return_value=True):
                 result = get_adb_binary_path()
-                assert result == '/user/adb'
+                assert result == "/user/adb"
 
     def test_get_adb_binary_path_local_fallback(self):
         """Test fallback to local platform-tools."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', side_effect=Exception()):
-            with patch('src.core.platform_utils.get_platform_tools_directory', return_value='/local/platform-tools'):
-                with patch('src.core.platform_utils.get_adb_binary_name', return_value='adb'):
-                    with patch('os.path.isfile', return_value=True):
-                        with patch('os.path.join', return_value='/local/platform-tools/adb'):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            side_effect=Exception(),
+        ):
+            with patch(
+                "src.core.platform_utils.get_platform_tools_directory",
+                return_value="/local/platform-tools",
+            ):
+                with patch(
+                    "src.core.platform_utils.get_adb_binary_name", return_value="adb"
+                ):
+                    with patch("os.path.isfile", return_value=True):
+                        with patch(
+                            "os.path.join", return_value="/local/platform-tools/adb"
+                        ):
                             result = get_adb_binary_path()
-                            assert result == '/local/platform-tools/adb'
+                            assert result == "/local/platform-tools/adb"
 
     def test_get_adb_binary_path_windows(self):
         """Test getting ADB path on Windows."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', return_value='/user/adb.exe'):
-            with patch('os.path.isfile', return_value=True):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            return_value="/user/adb.exe",
+        ):
+            with patch("os.path.isfile", return_value=True):
                 result = get_adb_binary_path()
-                assert result == '/user/adb.exe'
+                assert result == "/user/adb.exe"
 
     def test_ensure_platform_tools_simple(self):
         """Test basic platform tools installation."""
+
         # Just test the function doesn't crash with basic mocking
         def mock_isdir(path):
             # Return True for the extracted platform-tools directory and target directory checks
-            if path == '/tmp/test/platform-tools':
+            if path == "/tmp/test/platform-tools":
                 return True
-            if path.endswith('platform-tools') and 'tmp' in path:
+            if path.endswith("platform-tools") and "tmp" in path:
                 return True
             # Return False for other directory checks (like existing target_dir)
             return False
-        
-        with patch('os.makedirs'):
-            with patch('os.path.islink', return_value=False):
-                with patch('os.path.isdir', side_effect=mock_isdir):
-                    with patch('tempfile.mkdtemp', return_value='/tmp/test'):
-                        with patch('os.listdir', return_value=['platform-tools']):  # Mock directory listing
-                            with patch('requests.get') as mock_get:
-                                with patch('builtins.open', mock_open()):
-                                    with patch('zipfile.is_zipfile', return_value=True):
-                                        with patch('zipfile.ZipFile') as mock_zip:
+
+        with patch("os.makedirs"):
+            with patch("os.path.islink", return_value=False):
+                with patch("os.path.isdir", side_effect=mock_isdir):
+                    with patch("tempfile.mkdtemp", return_value="/tmp/test"):
+                        with patch(
+                            "os.listdir", return_value=["platform-tools"]
+                        ):  # Mock directory listing
+                            with patch("requests.get") as mock_get:
+                                with patch("builtins.open", mock_open()):
+                                    with patch("zipfile.is_zipfile", return_value=True):
+                                        with patch("zipfile.ZipFile") as mock_zip:
                                             # Mock zip file entries
                                             mock_info = Mock()
-                                            mock_info.filename = 'platform-tools/adb'
+                                            mock_info.filename = "platform-tools/adb"
                                             mock_info.file_size = 1000
                                             mock_zip_instance = MagicMock()
-                                            mock_zip_instance.infolist.return_value = [mock_info]
-                                            mock_zip.return_value.__enter__.return_value = mock_zip_instance
+                                            mock_zip_instance.infolist.return_value = [
+                                                mock_info
+                                            ]
+                                            mock_zip.return_value.__enter__.return_value = (
+                                                mock_zip_instance
+                                            )
 
-                                            with patch('shutil.move'):
-                                                with patch('os.chmod'):
-                                                    with patch('os.symlink'):
-                                                        with patch('shutil.rmtree'):
+                                            with patch("shutil.move"):
+                                                with patch("os.chmod"):
+                                                    with patch("os.symlink"):
+                                                        with patch("shutil.rmtree"):
                                                             mock_response = Mock()
-                                                            mock_response.iter_content.return_value = [b'content']
-                                                            mock_response.raise_for_status.return_value = None
+                                                            mock_response.iter_content.return_value = [
+                                                                b"content"
+                                                            ]
+                                                            mock_response.raise_for_status.return_value = (
+                                                                None
+                                                            )
                                                             mock_response.url = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
-                                                            mock_response.headers = {'Content-Type': 'application/zip'}
-                                                            mock_get.return_value = mock_response
+                                                            mock_response.headers = {
+                                                                "Content-Type": "application/zip"
+                                                            }
+                                                            mock_get.return_value = (
+                                                                mock_response
+                                                            )
 
-                                                            result = ensure_platform_tools_in_user_dir()
+                                                            result = (
+                                                                ensure_platform_tools_in_user_dir()
+                                                            )
                                                             assert result is not None
 
     def test_download_and_extract_adb_linux(self):
         """Test ADB download and extraction on Linux."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', return_value='/test/adb'):
-            with patch('os.path.isfile', return_value=True):
-                with patch('os.chmod') as mock_chmod:
-                    with patch('os.name', 'posix'):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            return_value="/test/adb",
+        ):
+            with patch("os.path.isfile", return_value=True):
+                with patch("os.chmod") as mock_chmod:
+                    with patch("os.name", "posix"):
                         result = download_and_extract_adb()
                         assert result is True
-                        mock_chmod.assert_called_once_with('/test/adb', 0o755)
+                        mock_chmod.assert_called_once_with("/test/adb", 0o755)
 
     def test_download_and_extract_adb_windows(self):
         """Test ADB download and extraction on Windows."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', return_value='/test/adb.exe'):
-            with patch('os.path.isfile', return_value=True):
-                with patch('os.name', 'nt'):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            return_value="/test/adb.exe",
+        ):
+            with patch("os.path.isfile", return_value=True):
+                with patch("os.name", "nt"):
                     result = download_and_extract_adb()
                     assert result is True
 
     def test_download_and_extract_adb_failure(self):
         """Test ADB download failure when file doesn't exist."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', return_value='/test/adb'):
-            with patch('os.path.isfile', return_value=False):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            return_value="/test/adb",
+        ):
+            with patch("os.path.isfile", return_value=False):
                 result = download_and_extract_adb()
                 assert result is False
 
     def test_download_and_extract_adb_exception(self):
         """Test ADB download failure with exception."""
-        with patch('src.core.platform_tools.ensure_platform_tools_in_user_dir', side_effect=Exception()):
+        with patch(
+            "src.core.platform_tools.ensure_platform_tools_in_user_dir",
+            side_effect=Exception(),
+        ):
             result = download_and_extract_adb()
             assert result is False
 
@@ -154,5 +201,5 @@ class TestPlatformToolsSecurityValidation:
         assert True  # Documentation test
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

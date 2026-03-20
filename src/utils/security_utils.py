@@ -8,8 +8,8 @@ import re
 from typing import Optional
 
 # Pre-compiled regex patterns for performance
-_DANGEROUS_CHAR_PATTERN = re.compile(r'[;|&$`\n\r><(){}[\]!]')
-_DANGEROUS_PATH_PATTERN = re.compile(r'[;|&`\n\r]|\$[({]|&&|\|\||>>')
+_DANGEROUS_CHAR_PATTERN = re.compile(r"[;|&$`\n\r><(){}[\]!]")
+_DANGEROUS_PATH_PATTERN = re.compile(r"[;|&`\n\r]|\$[({]|&&|\|\||>>")
 
 
 def sanitize_path_component(component: str) -> str:
@@ -28,17 +28,19 @@ def sanitize_path_component(component: str) -> str:
         raise ValueError("Path component cannot be empty")
 
     # Check for null bytes
-    if '\x00' in component:
+    if "\x00" in component:
         raise ValueError("Path component contains null byte")
 
     # Check for dangerous characters using pre-compiled regex
     # Matches any shell metacharacters that could be used for command injection
     match = _DANGEROUS_CHAR_PATTERN.search(component)
     if match:
-        raise ValueError(f"Path component contains dangerous character: {match.group()}")
+        raise ValueError(
+            f"Path component contains dangerous character: {match.group()}"
+        )
 
     # Check for command substitution patterns
-    if '$(' in component or '${' in component:
+    if "$(" in component or "${" in component:
         raise ValueError("Path component contains command substitution pattern")
 
     return component
@@ -63,7 +65,7 @@ def sanitize_android_path(path: str) -> str:
     path = path.strip()
 
     # Check for null bytes
-    if '\x00' in path:
+    if "\x00" in path:
         raise ValueError("Path contains null byte")
 
     # Check for command injection patterns using pre-compiled regex
@@ -83,7 +85,9 @@ def sanitize_android_path(path: str) -> str:
     return path
 
 
-def sanitize_local_path(path: str, base_dir: Optional[str] = None, allow_nonexistent: bool = True) -> str:
+def sanitize_local_path(
+    path: str, base_dir: Optional[str] = None, allow_nonexistent: bool = True
+) -> str:
     """Sanitize a local filesystem path and check for path traversal.
 
     Args:
@@ -104,7 +108,7 @@ def sanitize_local_path(path: str, base_dir: Optional[str] = None, allow_nonexis
     path = path.strip()
 
     # Check for null bytes
-    if '\x00' in path:
+    if "\x00" in path:
         raise ValueError("Path contains null byte")
 
     # Normalize the path to resolve .. and symlinks
@@ -131,8 +135,13 @@ def sanitize_local_path(path: str, base_dir: Optional[str] = None, allow_nonexis
             else:
                 base_dir_abs = os.path.normpath(os.path.realpath(base_dir))
             # Check if the normalized path starts with the base directory
-            if not normalized_path.startswith(base_dir_abs + os.sep) and normalized_path != base_dir_abs:
-                raise ValueError(f"Path traversal detected: path is outside base directory")
+            if (
+                not normalized_path.startswith(base_dir_abs + os.sep)
+                and normalized_path != base_dir_abs
+            ):
+                raise ValueError(
+                    f"Path traversal detected: path is outside base directory"
+                )
         except (ValueError, OSError) as e:
             raise ValueError(f"Invalid base directory: {e}")
 
@@ -155,11 +164,11 @@ def validate_device_id(device_id: str) -> str:
         raise ValueError("Device ID cannot be empty")
 
     # Device IDs should only contain alphanumeric characters, dots, colons, and hyphens
-    if not re.match(r'^[a-zA-Z0-9.:_-]+$', device_id):
+    if not re.match(r"^[a-zA-Z0-9.:_-]+$", device_id):
         raise ValueError("Device ID contains invalid characters")
 
     # Check for command injection patterns
-    dangerous_chars = [';', '|', '&', '$', '`', '\n', '\r', ' ', '>', '<']
+    dangerous_chars = [";", "|", "&", "$", "`", "\n", "\r", " ", ">", "<"]
     for char in dangerous_chars:
         if char in device_id:
             raise ValueError(f"Device ID contains dangerous character: {char}")

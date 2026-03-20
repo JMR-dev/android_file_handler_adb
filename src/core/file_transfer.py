@@ -22,7 +22,7 @@ except ImportError:
 
 class ADBFileTransfer(ProgressTracker):
     """Handles ADB file transfer operations with progress tracking."""
-    
+
     def __init__(self):
         ProgressTracker.__init__(self)
         # Composition: allow tests to patch ADBCommandRunner constructor
@@ -43,7 +43,7 @@ class ADBFileTransfer(ProgressTracker):
             return bool(result) if result is not None else False
         except Exception:
             return False
-    
+
     def _validate_windows_root_path(self, path: str, operation: str):
         """Validate Windows root drive paths and raise on invalid usage.
 
@@ -54,13 +54,17 @@ class ADBFileTransfer(ProgressTracker):
         """
         # Detect bare drive root (e.g., "C:" or "D:")
         path_str = str(path).strip()
-        if len(path_str) >= 2 and path_str[1] == ":" and (len(path_str) == 2 or path_str.endswith(("/", "\\"))):
+        if (
+            len(path_str) >= 2
+            and path_str[1] == ":"
+            and (len(path_str) == 2 or path_str.endswith(("/", "\\")))
+        ):
             op_lower = operation.lower()
             if "push" in op_lower:
                 raise ValueError("Cannot push to Windows root")
             if "pull" in op_lower:
                 raise ValueError("Cannot pull from Windows root")
-    
+
     def pull_file(self, remote_file_path: str, local_file_path: str) -> bool:
         """Pull a single file from Android device to local machine."""
         # Sanitize paths to prevent injection and traversal
@@ -86,9 +90,11 @@ class ADBFileTransfer(ProgressTracker):
                 self.update_status(f"Failed to create local directory: {e}")
                 pass
 
-        result = self.runner.run_adb_command(['pull', sanitized_remote, sanitized_local])
+        result = self.runner.run_adb_command(
+            ["pull", sanitized_remote, sanitized_local]
+        )
         return self._is_command_success(result)
-    
+
     def push_file(self, local_file_path: str, remote_file_path: str) -> bool:
         """Push a single file from local machine to Android device."""
         # Sanitize paths to prevent injection and traversal
@@ -102,9 +108,11 @@ class ADBFileTransfer(ProgressTracker):
         if not os.path.exists(sanitized_local) or not os.path.isfile(sanitized_local):
             return False
 
-        result = self.runner.run_adb_command(['push', sanitized_local, sanitized_remote])
+        result = self.runner.run_adb_command(
+            ["push", sanitized_local, sanitized_remote]
+        )
         return self._is_command_success(result)
-    
+
     def pull_folder(self, remote_path: str, local_path: str) -> bool:
         """Pull files from Android device to local machine."""
         # Sanitize paths to prevent injection and traversal
@@ -123,9 +131,11 @@ class ADBFileTransfer(ProgressTracker):
         except Exception:
             # Ignore directory creation failures for test environment
             pass
-        result = self.runner.run_adb_command(['pull', sanitized_remote, sanitized_local])
+        result = self.runner.run_adb_command(
+            ["pull", sanitized_remote, sanitized_local]
+        )
         return self._is_command_success(result)
-    
+
     def push_folder(self, local_path: str, remote_path: str) -> bool:
         """Push files from local machine to Android device."""
         # Sanitize paths to prevent injection and traversal
@@ -138,9 +148,11 @@ class ADBFileTransfer(ProgressTracker):
 
         if not os.path.exists(sanitized_local) or not os.path.isdir(sanitized_local):
             return False
-        result = self.runner.run_adb_command(['push', sanitized_local, sanitized_remote])
+        result = self.runner.run_adb_command(
+            ["push", sanitized_local, sanitized_remote]
+        )
         return self._is_command_success(result)
-    
+
     def _execute_transfer_command(self, cmd: list, operation_name: str) -> bool:
         """Execute a single file transfer command with progress tracking."""
         try:
@@ -165,11 +177,11 @@ class ADBFileTransfer(ProgressTracker):
                 for line in proc.stdout:
                     line_count += 1
                     current_time = time.time()
-                    
+
                     # Check for file completion
                     if "1 file" in line and ("pulled" in line or "pushed" in line):
                         self.update_transfer_progress(1, 1)
-                    
+
                     pct = self.parse_progress(line)
 
                     if pct is not None:
@@ -179,9 +191,14 @@ class ADBFileTransfer(ProgressTracker):
                         last_update_time = current_time
                     else:
                         # For single files, use simpler progress estimation
-                        estimated = TransferProgressEstimator.estimate_progress_from_time(
-                            start_time, last_progress, elapsed_threshold=1.0, 
-                            max_increment=20, max_progress=90
+                        estimated = (
+                            TransferProgressEstimator.estimate_progress_from_time(
+                                start_time,
+                                last_progress,
+                                elapsed_threshold=1.0,
+                                max_increment=20,
+                                max_progress=90,
+                            )
                         )
                         if estimated is not None:
                             self.update_progress(estimated)
@@ -213,9 +230,10 @@ class ADBFileTransfer(ProgressTracker):
             self.update_status(f"{operation_name} error: {e}")
             self.current_process = None
             return False
-    
-    def _execute_folder_transfer_command(self, cmd: list, operation_name: str, 
-                                       completion_verb: str) -> bool:
+
+    def _execute_folder_transfer_command(
+        self, cmd: list, operation_name: str, completion_verb: str
+    ) -> bool:
         """Execute a folder transfer command with progress tracking."""
         try:
             self.update_progress(0)
@@ -240,22 +258,28 @@ class ADBFileTransfer(ProgressTracker):
                 for line in proc.stdout:
                     line_count += 1
                     current_time = time.time()
-                    
+
                     # Check for file completion patterns in ADB output
-                    if f": 1 file {completion_verb}" in line or f"files {completion_verb}" in line:
+                    if (
+                        f": 1 file {completion_verb}" in line
+                        or f"files {completion_verb}" in line
+                    ):
                         # Extract number of files from the line
                         if f"1 file {completion_verb}" in line:
                             files_transferred += 1
                         else:
                             # Parse "X files pulled/pushed" pattern
-                            match = re.search(rf'(\d+) files {completion_verb}', line)
+                            match = re.search(rf"(\d+) files {completion_verb}", line)
                             if match:
                                 files_transferred = int(match.group(1))
-                        
+
                         # Update file transfer progress
-                        if self.transfer_progress['files_to_transfer'] > 0:
-                            self.update_transfer_progress(files_transferred, self.transfer_progress['files_to_transfer'])
-                    
+                        if self.transfer_progress["files_to_transfer"] > 0:
+                            self.update_transfer_progress(
+                                files_transferred,
+                                self.transfer_progress["files_to_transfer"],
+                            )
+
                     pct = self.parse_progress(line)
 
                     if pct is not None:
@@ -269,9 +293,13 @@ class ADBFileTransfer(ProgressTracker):
                         should_update = False
                         new_progress = last_progress
 
-                        if operation_name == "Transfer":  # Pull operation - more complex logic
-                            estimated = TransferProgressEstimator.estimate_complex_progress(
-                                line_count, elapsed_time, last_progress
+                        if (
+                            operation_name == "Transfer"
+                        ):  # Pull operation - more complex logic
+                            estimated = (
+                                TransferProgressEstimator.estimate_complex_progress(
+                                    line_count, elapsed_time, last_progress
+                                )
                             )
                             if estimated is not None and time_since_last_update >= 2.0:
                                 new_progress = estimated
@@ -281,9 +309,14 @@ class ADBFileTransfer(ProgressTracker):
                                 new_progress = min(last_progress + increment, 90)
                                 should_update = True
                         else:  # Push operation - simpler logic
-                            estimated = TransferProgressEstimator.estimate_progress_from_time(
-                                start_time, last_progress, elapsed_threshold=1.0,
-                                max_increment=20, max_progress=90
+                            estimated = (
+                                TransferProgressEstimator.estimate_progress_from_time(
+                                    start_time,
+                                    last_progress,
+                                    elapsed_threshold=1.0,
+                                    max_increment=20,
+                                    max_progress=90,
+                                )
                             )
                             if estimated is not None:
                                 new_progress = estimated
@@ -318,7 +351,7 @@ class ADBFileTransfer(ProgressTracker):
             self.update_status(f"{operation_name} error: {e}")
             self.current_process = None
             return False
-    
+
     def cancel_transfer(self) -> bool:
         """Cancel the current transfer operation."""
         # Local implementation to avoid depending on ADBCommandRunner inheritance
