@@ -1,7 +1,7 @@
 """Prefect orchestration flow for the CI/CD release pipeline.
 
 Coordinates Dagger-based Linux builds, GPG signing, GitHub release
-creation, and S3 artifact upload.
+creation, and Cloudflare R2 artifact upload.
 
 Usage:
     # Build all Linux distros (CI)
@@ -10,10 +10,10 @@ Usage:
     # Sign artifacts in dist/
     poetry run python -m ci.prefect_flow sign --gpg-passphrase "$GPG_PASSPHRASE"
 
-    # Create GitHub release + upload S3
+    # Create GitHub release + upload R2
     poetry run python -m ci.prefect_flow release --github-token "$GITHUB_TOKEN"
 
-    # Full pipeline (build + sign + release + S3)
+    # Full pipeline (build + sign + release + R2)
     poetry run python -m ci.prefect_flow full --gpg-passphrase "$GPG_PASSPHRASE" \\
         --github-token "$GITHUB_TOKEN"
 """
@@ -28,6 +28,7 @@ from prefect import flow, task
 
 from ci.config import PipelineConfig
 from ci.dagger_pipeline import build_all_linux
+from ci.r2_upload import upload_to_r2
 from ci.signing import sign_and_hash
 
 # ---------------------------------------------------------------------------
@@ -159,32 +160,30 @@ def task_create_github_release(
     print(f"GitHub release {tag} created successfully")
 
 
-@task(name="upload-s3")
-def task_upload_s3(
+@task(name="upload-r2")
+def task_upload_r2(
     release_dir: Path,
-    s3_bucket: str,
+    gcp_project_id: str,
     run_id: str,
-) -> None:
-    """Upload release artifacts to S3.
+) -> list[str]:
+    """Upload release artifacts to Cloudflare R2.
+
+    Credentials are fetched from GCP Secrets Manager at runtime.
 
     Args:
         release_dir: Directory containing release files.
-        s3_bucket: S3 bucket name.
+        gcp_project_id: GCP project ID for Secrets Manager lookups.
         run_id: Unique identifier for this build run.
+
+    Returns:
+        List of uploaded R2 object keys.
     """
-    if not s3_bucket:
-        print("S3_BUCKET not set; skipping upload")
-        return
+    if not gcp_project_id:
+        print("GCP_PROJECT_ID not set; skipping R2 upload")
+        return []
 
-    target = f"s3://{s3_bucket}/builds/{run_id}/"
-    print(f"Uploading to {target}")
-
-    subprocess.run(
-        ["aws", "s3", "sync", str(release_dir), target, "--acl", "private"],
-        check=True,
-        env={**os.environ, "AWS_PAGER": ""},
-    )
-    print("S3 upload complete")
+    print(f"Uploading to Cloudflare R2 (build {run_id})")
+    return upload_to_r2(release_dir, gcp_project_id, run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +208,10 @@ def flow_sign(gpg_passphrase: str) -> list[Path]:
 @flow(name="release-flow", log_prints=True)
 def flow_release(
     github_token: str,
-    s3_bucket: str = "",
+    gcp_project_id: str = "",
     run_id: str = "",
 ) -> None:
-    """Create a GitHub release and optionally upload to S3."""
+    """Create a GitHub release and optionally upload to Cloudflare R2."""
     config = PipelineConfig()
     version = task_get_version()
 
@@ -220,30 +219,52 @@ def flow_release(
     task_prepare_release_files(config.project_root / "dist", release_dir)
     task_create_github_release(version, release_dir, github_token)
 
-    if s3_bucket:
-        task_upload_s3(release_dir, s3_bucket, run_id or "local")
+    if gcp_project_id:
+        task_upload_r2(release_dir, gcp_project_id, run_id or "local")
+
+
+@flow(name="upload-r2-flow", log_prints=True)
+def flow_upload_r2(
+    gcp_project_id: str,
+    run_id: str = "",
+    release_dir: str = "",
+) -> list[str]:
+    """Upload release artifacts to Cloudflare R2 (standalone).
+
+    Args:
+        gcp_project_id: GCP project ID for Secrets Manager lookups.
+        run_id: Build run identifier for R2 path.
+        release_dir: Path to directory containing artifacts. Defaults to
+            <project_root>/release-files.
+
+    Returns:
+        List of uploaded R2 object keys.
+    """
+    config = PipelineConfig()
+    target_dir = Path(release_dir) if release_dir else config.project_root / "release-files"
+    return task_upload_r2(target_dir, gcp_project_id, run_id or "local")  # type: ignore[return-value]
 
 
 @flow(name="full-pipeline", log_prints=True)
 def flow_full_pipeline(
     gpg_passphrase: str = "",
     github_token: str = "",
-    s3_bucket: str = "",
+    gcp_project_id: str = "",
     run_id: str = "",
     skip_build: bool = False,
     skip_sign: bool = False,
     skip_release: bool = False,
 ) -> None:
-    """Run the complete CI/CD pipeline: build → sign → release → S3.
+    """Run the complete CI/CD pipeline: build → sign → release → R2.
 
     Args:
         gpg_passphrase: GPG key passphrase for signing.
         github_token: GitHub token for release creation.
-        s3_bucket: Optional S3 bucket for artifact upload.
-        run_id: Build run identifier for S3 path.
+        gcp_project_id: GCP project ID for R2 credential lookup.
+        run_id: Build run identifier for R2 path.
         skip_build: Skip the Linux build step.
         skip_sign: Skip the signing step.
-        skip_release: Skip the release + S3 step.
+        skip_release: Skip the release + R2 step.
     """
     config = PipelineConfig()
 
@@ -266,8 +287,8 @@ def flow_full_pipeline(
         task_prepare_release_files(config.project_root / "dist", release_dir)
         task_create_github_release(version, release_dir, github_token)
 
-        if s3_bucket:
-            task_upload_s3(release_dir, s3_bucket, run_id or "local")
+        if gcp_project_id:
+            task_upload_r2(release_dir, gcp_project_id, run_id or "local")
 
 
 # ---------------------------------------------------------------------------
@@ -292,14 +313,20 @@ def main() -> None:
     # release
     release_parser = subparsers.add_parser("release", help="Create GitHub release")
     release_parser.add_argument("--github-token", required=True, help="GitHub token")
-    release_parser.add_argument("--s3-bucket", default="", help="S3 bucket name")
+    release_parser.add_argument("--gcp-project-id", default="", help="GCP project ID for R2 credentials")
     release_parser.add_argument("--run-id", default="", help="Build run ID")
+
+    # upload-r2
+    r2_parser = subparsers.add_parser("upload-r2", help="Upload artifacts to Cloudflare R2")
+    r2_parser.add_argument("--gcp-project-id", required=True, help="GCP project ID for R2 credentials")
+    r2_parser.add_argument("--run-id", default="", help="Build run ID")
+    r2_parser.add_argument("--release-dir", default="", help="Path to artifact directory")
 
     # full
     full_parser = subparsers.add_parser("full", help="Run full pipeline")
     full_parser.add_argument("--gpg-passphrase", default="", help="GPG passphrase")
     full_parser.add_argument("--github-token", default="", help="GitHub token")
-    full_parser.add_argument("--s3-bucket", default="", help="S3 bucket name")
+    full_parser.add_argument("--gcp-project-id", default="", help="GCP project ID for R2 credentials")
     full_parser.add_argument("--run-id", default="", help="Build run ID")
     full_parser.add_argument("--skip-build", action="store_true")
     full_parser.add_argument("--skip-sign", action="store_true")
@@ -314,14 +341,20 @@ def main() -> None:
     elif args.action == "release":
         flow_release(
             github_token=args.github_token,
-            s3_bucket=args.s3_bucket,
+            gcp_project_id=args.gcp_project_id,
             run_id=args.run_id,
+        )
+    elif args.action == "upload-r2":
+        flow_upload_r2(
+            gcp_project_id=args.gcp_project_id,
+            run_id=args.run_id,
+            release_dir=args.release_dir,
         )
     elif args.action == "full":
         flow_full_pipeline(
             gpg_passphrase=args.gpg_passphrase,
             github_token=args.github_token,
-            s3_bucket=args.s3_bucket,
+            gcp_project_id=args.gcp_project_id,
             run_id=args.run_id,
             skip_build=args.skip_build,
             skip_sign=args.skip_sign,

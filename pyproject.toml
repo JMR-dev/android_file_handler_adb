@@ -45,6 +45,8 @@ optional = true
 [tool.poetry.group.ci.dependencies]
 dagger-io = ">=0.15.0"
 prefect = ">=3.0.0"
+boto3 = ">=1.35.0"
+google-cloud-secret-manager = ">=2.21.0"
 
 [tool.black]
 line-length = 88

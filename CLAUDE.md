@@ -73,6 +73,10 @@ poetry run python -m ci.prefect_flow sign --gpg-passphrase "$GPG_PASSPHRASE"
 poetry run python -m ci.prefect_flow full \
   --gpg-passphrase "$GPG_PASSPHRASE" \
   --github-token "$GITHUB_TOKEN"
+
+# Upload artifacts to Cloudflare R2 (standalone)
+poetry run python -m ci.prefect_flow upload-r2 \
+  --gcp-project-id "$GCP_PROJECT_ID"
 ```
 
 #### Podman Compose Build (Recommended for Linux)
@@ -163,7 +167,7 @@ poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 The project uses a **Prefect + Dagger** pipeline wrapped by GitHub Actions (`.github/workflows/release-prefect-dagger.yml`):
 
 - **Dagger** runs containerized Linux builds (Debian, Arch, RHEL) using pre-built builder images
-- **Prefect** orchestrates the pipeline: build → sign → release → S3 upload
+- **Prefect** orchestrates the pipeline: build → sign → release → R2 upload
 - **GitHub Actions** provides the runner infrastructure and Windows build (cannot containerize)
 - **Podman** is the container runtime (Dagger connects via Podman socket)
 
@@ -171,13 +175,14 @@ Pipeline structure:
 1. `build-windows` — Native Windows build on `windows-latest`
 2. `build-linux` — All Linux distros built in parallel via Prefect + Dagger
 3. `do-release` — Creates GitHub release with all artifacts
-4. `upload-s3` — Optional S3 upload
+4. `upload-r2` — Uploads artifacts to Cloudflare R2 (credentials from GCP Secrets Manager)
 5. `sync-wiki` — Wiki synchronization
 
 The CI pipeline modules live in `ci/`:
 - `ci/config.py` — Shared build configuration
 - `ci/dagger_pipeline.py` — Dagger container build definitions
 - `ci/prefect_flow.py` — Prefect flow orchestration and CLI
+- `ci/r2_upload.py` — Cloudflare R2 upload with GCP Secrets Manager integration
 - `ci/signing.py` — GPG signing and SHA-256 hashing utilities
 
 ## Coding Standards
