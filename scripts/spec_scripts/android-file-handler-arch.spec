@@ -1,10 +1,13 @@
+import os
 block_cipher = None
+SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
+SRC_DIR = os.path.normpath(os.path.join(SPEC_DIR, '..', '..', 'src'))
 a = Analysis(
-    ['../../src/main.py'],
-    pathex=['src'],
+    [os.path.join(SRC_DIR, 'main.py')],
+    pathex=[SRC_DIR],
     binaries=[],
     datas=[
-        ('../../src/gui', 'gui'),
+        (os.path.join(SRC_DIR, 'gui'), 'gui'),
     ],
     hiddenimports=[
         # GUI modules
@@ -33,7 +36,8 @@ a = Analysis(
         'managers.transfer_manager',
         # Utility modules
         'utils',
-        'utils.file_deduplication'
+        'utils.file_deduplication',
+        'utils.security_utils'
     ],
     hookspath=[],
     hooksconfig={},
