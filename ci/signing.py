@@ -31,9 +31,13 @@ def gpg_sign_file(file_path: Path, passphrase: str) -> Path:
 
         subprocess.run(
             [
-                "gpg", "--batch", "--yes",
-                "--passphrase-file", passfile.name,
-                "--detach-sign", "--armor",
+                "gpg",
+                "--batch",
+                "--yes",
+                "--passphrase-file",
+                passfile.name,
+                "--detach-sign",
+                "--armor",
                 str(file_path),
             ],
             check=True,

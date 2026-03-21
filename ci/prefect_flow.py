@@ -22,7 +22,6 @@ import asyncio
 import argparse
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from prefect import flow, task
@@ -31,14 +30,13 @@ from ci.config import PipelineConfig
 from ci.dagger_pipeline import build_all_linux
 from ci.signing import sign_and_hash
 
-
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------
 
 
 @task(name="build-linux-distros", retries=1, retry_delay_seconds=30)
-def task_build_linux(config: PipelineConfig) -> dict:
+def task_build_linux(config: PipelineConfig) -> dict[str, dict[str, Path]]:  # type: ignore[type-arg]
     """Build all Linux distribution packages via Dagger containers."""
     print("=== Building Linux packages via Dagger ===")
     results = asyncio.run(build_all_linux(config))
@@ -116,6 +114,7 @@ def task_prepare_release_files(dist_dir: Path, release_dir: Path) -> list[Path]:
             dst = release_dir / src.name
             if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
                 import shutil
+
                 shutil.copy2(src, dst)
                 copied.append(dst)
                 print(f"  {src.name}")
@@ -146,8 +145,12 @@ def task_create_github_release(
     env = {**os.environ, "GH_TOKEN": github_token}
 
     cmd = [
-        "gh", "release", "create", tag,
-        "--title", f"Release {tag}",
+        "gh",
+        "release",
+        "create",
+        tag,
+        "--title",
+        f"Release {tag}",
         "--latest",
     ] + [str(f) for f in files]
 
@@ -190,10 +193,10 @@ def task_upload_s3(
 
 
 @flow(name="build-linux-flow", log_prints=True)
-def flow_build_linux() -> dict:
+def flow_build_linux() -> dict[str, dict[str, Path]]:  # type: ignore[type-arg]
     """Build all Linux distribution packages."""
     config = PipelineConfig()
-    return task_build_linux(config)
+    return task_build_linux(config)  # type: ignore[return-value]
 
 
 @flow(name="sign-flow", log_prints=True)

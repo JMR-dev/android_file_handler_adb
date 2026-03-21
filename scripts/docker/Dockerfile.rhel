@@ -7,8 +7,10 @@
 
 FROM fedora:42
 
-# Set build argument for fpm version (can be overridden at build time)
+# Set build arguments
 ARG FPM_VERSION=1.16.0
+ARG PYTHON_VERSION=3.14.3
+ARG PYTHON_SHA256=d7fe130d0501ae047ca318fa92aa642603ab6f217901015a1df6ce650d5470cd
 
 # Install system dependencies including tk8-devel for Python tkinter support
 # Using tk8 (version 8.6) instead of tk (version 9.0) for Python 3.12 compatibility
@@ -42,24 +44,26 @@ RUN dnf -y update && \
     libXrender-devel && \
     dnf clean all
 
-# Install pyenv
-ENV PYENV_ROOT="/root/.pyenv"
-ENV PATH="$PYENV_ROOT/bin:$PATH"
+# Download Python source and verify SHA256 checksum against python.org
+RUN wget -q "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz" \
+    -O /tmp/Python-${PYTHON_VERSION}.tgz && \
+    echo "${PYTHON_SHA256}  /tmp/Python-${PYTHON_VERSION}.tgz" | sha256sum -c -
 
-RUN git clone https://github.com/pyenv/pyenv.git /root/.pyenv
-
-# Install Python 3.13 via pyenv with tkinter support
-# The tk8-devel package must be installed before this step for _tkinter to be compiled
-RUN eval "$(pyenv init -)" && \
+# Build and install Python from source
+RUN cd /tmp && tar xzf Python-${PYTHON_VERSION}.tgz && \
+    cd Python-${PYTHON_VERSION} && \
     LDFLAGS="-L/usr/lib64" \
     CPPFLAGS="-I/usr/include" \
-    PYTHON_CONFIGURE_OPTS="--enable-shared" \
-    pyenv install 3.13 && \
-    pyenv global 3.13 && \
-    pyenv rehash
+    ./configure --enable-shared --with-ensurepip=install --prefix=/usr/local && \
+    make -j$(nproc) && \
+    make install && \
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf && \
+    ldconfig && \
+    ln -sf /usr/local/bin/python3 /usr/local/bin/python && \
+    rm -rf /tmp/Python-${PYTHON_VERSION} /tmp/Python-${PYTHON_VERSION}.tgz
 
-# Update PATH to include pyenv shims
-ENV PATH="/root/.pyenv/shims:$PATH"
+# Update PATH to include Python installation
+ENV PATH="/usr/local/bin:$PATH"
 
 # Verify Python has tkinter support
 RUN python3 -c "import tkinter; import _tkinter; print('tkinter support verified')" || \
