@@ -68,6 +68,15 @@ jobs:
           # Use the Windows spec file so packaging is consistent and reproducible
           poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 
+      - name: Build Windows installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = (poetry version -s).Trim()
+          Write-Output "Building installer for version $version"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "scripts\windows\android-file-handler-setup.iss" `
+            "/DMyAppVersion=$version"
+
       - name: Import GPG key
         shell: pwsh
         run: |
@@ -75,23 +84,37 @@ jobs:
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
           gpg --list-secret-keys
 
-      - name: Sign and hash Windows executable
+      - name: Sign and hash Windows artifacts
         shell: pwsh
         run: |
-          $exePath = Get-ChildItem -Path dist -Filter "android-file-handler.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $exePath) {
-            Write-Error "Executable not found"
-            exit 1
-          }
-          Write-Output "Found executable: $exePath"
-
           # Create temporary file for passphrase
           $passphraseFile = New-TemporaryFile
           try {
             "${{ secrets.GPG_PASSPHRASE }}" | Out-File -FilePath $passphraseFile -Encoding ASCII -NoNewline
 
-            # Sign with GPG using passphrase file
+            # Sign and hash the standalone executable
+            $exePath = Get-ChildItem -Path dist -Filter "android-file-handler-windows.exe" | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $exePath) {
+              Write-Error "Standalone executable not found"
+              exit 1
+            }
+            Write-Output "Signing executable: $exePath"
             gpg --batch --yes --passphrase-file "$passphraseFile" --detach-sign --armor "$exePath"
+            $hash = (Get-FileHash -Path "$exePath" -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path -Leaf $exePath)" | Out-File -FilePath "dist/android-file-handler-windows.sha256" -Encoding ASCII -NoNewline
+            Write-Output "Executable SHA-256: $hash"
+
+            # Sign and hash the Inno Setup installer
+            $setupPath = Get-ChildItem -Path dist -Filter "android-file-handler-setup.exe" | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $setupPath) {
+              Write-Error "Installer not found"
+              exit 1
+            }
+            Write-Output "Signing installer: $setupPath"
+            gpg --batch --yes --passphrase-file "$passphraseFile" --detach-sign --armor "$setupPath"
+            $setupHash = (Get-FileHash -Path "$setupPath" -Algorithm SHA256).Hash.ToLower()
+            "$setupHash  $(Split-Path -Leaf $setupPath)" | Out-File -FilePath "dist/android-file-handler-setup.sha256" -Encoding ASCII -NoNewline
+            Write-Output "Installer SHA-256: $setupHash"
           }
           finally {
             # Clean up passphrase file
@@ -100,22 +123,17 @@ jobs:
             }
           }
 
-          # Generate SHA-256 hash
-          $hash = (Get-FileHash -Path "$exePath" -Algorithm SHA256).Hash.ToLower()
-          $hashFile = "dist/android-file-handler-windows.sha256"
-          "$hash  $(Split-Path -Leaf $exePath)" | Out-File -FilePath $hashFile -Encoding ASCII -NoNewline
-          Write-Output "SHA-256: $hash"
-
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
           path: |
-            dist/**/android-file-handler*.exe
-            dist/**/android-file-handler*.exe.asc
-            dist/android-file-handler.exe
-            dist/android-file-handler.exe.asc
+            dist/android-file-handler-windows.exe
+            dist/android-file-handler-windows.exe.asc
             dist/android-file-handler-windows.sha256
+            dist/android-file-handler-setup.exe
+            dist/android-file-handler-setup.exe.asc
+            dist/android-file-handler-setup.sha256
        
   build-debian:
     permissions:

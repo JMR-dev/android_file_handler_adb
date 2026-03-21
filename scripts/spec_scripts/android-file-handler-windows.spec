@@ -5,8 +5,7 @@ a = Analysis(
     pathex=['../..'],
     binaries=[],
     datas=[
-        ('../../src/gui', 'gui'), 
-        ('../windows/first_run_install.ps1', 'scripts/windows')
+        ('../../src/gui', 'gui'),
     ],
     hiddenimports=[
         # GUI modules

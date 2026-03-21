@@ -58,21 +58,35 @@ poetry run mypy src/
 poetry run python scripts/build_package_linux.py
 ```
 
-#### Docker Compose Build (Recommended for Linux)
+#### Prefect + Dagger Build (CI Pipeline Locally)
 ```sh
-# Build all distributions (Debian, Arch, RHEL)
-docker compose up --build
+# Install CI dependencies
+poetry install --with ci
+
+# Build all Linux distros via Dagger containers
+poetry run python -m ci.prefect_flow build-linux
+
+# Sign artifacts
+poetry run python -m ci.prefect_flow sign --gpg-passphrase "$GPG_PASSPHRASE"
+
+# Full pipeline (build + sign + release)
+poetry run python -m ci.prefect_flow full \
+  --gpg-passphrase "$GPG_PASSPHRASE" \
+  --github-token "$GITHUB_TOKEN"
+```
+
+#### Podman Compose Build (Recommended for Linux)
+```sh
+# Build all distributions
+podman-compose up --build
 
 # Build specific distribution
-docker compose up --build debian
-docker compose up --build arch
-docker compose up --build rhel
-
-# Build all in parallel
-docker compose up --build --parallel
+podman-compose up --build debian
+podman-compose up --build arch
+podman-compose up --build rhel
 
 # Clean build artifacts
-docker compose down -v && rm -rf dist pkg_dist_* dist_*
+podman-compose down -v && rm -rf dist pkg_dist_* dist_*
 ```
 
 See [scripts/docker/README.md](scripts/docker/README.md) for detailed Docker build documentation.
@@ -81,6 +95,10 @@ See [scripts/docker/README.md](scripts/docker/README.md) for detailed Docker bui
 ```sh
 # Windows executable (PyInstaller)
 poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
+
+# Windows installer (Inno Setup, after PyInstaller build)
+# Inno Setup 6 is pre-installed on GitHub Actions windows-latest runners
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" scripts\windows\android-file-handler-setup.iss /DMyAppVersion=0.1.1
 
 # Linux packages use distro-specific spec files:
 # - android-file-handler-debian.spec
@@ -116,6 +134,13 @@ poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 - **scripts/**: Build and packaging scripts
   - `build_package_linux.py`: Unified Linux packaging script (uses DISTRO_TYPE env var)
   - `spec_scripts/`: PyInstaller spec files for each platform
+  - `windows/android-file-handler-setup.iss`: Inno Setup installer configuration
+
+- **ci/**: CI/CD pipeline orchestration
+  - `config.py`: Shared build configuration (distro configs, image references)
+  - `dagger_pipeline.py`: Dagger container build definitions for Linux
+  - `prefect_flow.py`: Prefect flow orchestration and CLI entry point
+  - `signing.py`: GPG signing and SHA-256 hashing utilities
 
 - **tests/**: Test suite mirroring src/ structure
 
@@ -135,12 +160,25 @@ poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 
 ## CI/CD
 
-The project uses GitHub Actions for multi-platform builds (`.github/workflows/release.yml`):
-- Runs tests on Linux and Windows
-- Builds binaries for Windows, Debian, Arch, and RHEL
-- Packages using PyInstaller + fpm
-- Supports manual workflow dispatch with configurable jobs
-- Optional GitHub release creation and S3 upload
+The project uses a **Prefect + Dagger** pipeline wrapped by GitHub Actions (`.github/workflows/release-prefect-dagger.yml`):
+
+- **Dagger** runs containerized Linux builds (Debian, Arch, RHEL) using pre-built builder images
+- **Prefect** orchestrates the pipeline: build → sign → release → S3 upload
+- **GitHub Actions** provides the runner infrastructure and Windows build (cannot containerize)
+- **Podman** is the container runtime (Dagger connects via Podman socket)
+
+Pipeline structure:
+1. `build-windows` — Native Windows build on `windows-latest`
+2. `build-linux` — All Linux distros built in parallel via Prefect + Dagger
+3. `do-release` — Creates GitHub release with all artifacts
+4. `upload-s3` — Optional S3 upload
+5. `sync-wiki` — Wiki synchronization
+
+The CI pipeline modules live in `ci/`:
+- `ci/config.py` — Shared build configuration
+- `ci/dagger_pipeline.py` — Dagger container build definitions
+- `ci/prefect_flow.py` — Prefect flow orchestration and CLI
+- `ci/signing.py` — GPG signing and SHA-256 hashing utilities
 
 ## Coding Standards
 

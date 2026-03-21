@@ -1,52 +1,57 @@
-# Docker Build Environment
+# Container Build Environment
 
-This directory contains Dockerfiles for building the Android File Handler on different Linux distributions. These images match exactly the images used in the CI/CD pipeline.
+This directory contains OCI-compatible Containerfiles (Dockerfiles) for building the Android File Handler on different Linux distributions. These images match exactly the images used in the CI/CD pipeline.
+
+The project uses **Podman** as the container runtime. All commands below use Podman; if you have Docker installed, the Dockerfiles are OCI-compatible and will work with Docker as well.
 
 ## Quick Start
 
-### Using Docker Compose (Recommended)
+### Using Podman Compose (Recommended)
 
 Build for all distributions:
 ```bash
-docker-compose up --build
+podman-compose up --build
 ```
 
 Build for a specific distribution:
 ```bash
-docker-compose up --build debian
-docker-compose up --build arch
-docker-compose up --build rhel
+podman-compose up --build debian
+podman-compose up --build arch
+podman-compose up --build rhel
 ```
 
-Build all distributions in parallel:
+### Using Prefect + Dagger (CI Pipeline Locally)
+
+The CI/CD pipeline uses Prefect and Dagger to orchestrate builds. You can run it locally:
 ```bash
-docker-compose up --build --parallel
+poetry install --with ci
+poetry run python -m ci.prefect_flow build-linux
 ```
 
-### Manual Docker Build
+### Manual Podman Build
 
 Build the image:
 ```bash
 # Debian
-docker build -f scripts/docker/Dockerfile.debian -t android-file-handler-debian-builder .
+podman build -f scripts/docker/Dockerfile.debian -t android-file-handler-debian-builder .
 
 # Arch
-docker build -f scripts/docker/Dockerfile.arch -t android-file-handler-arch-builder .
+podman build -f scripts/docker/Dockerfile.arch -t android-file-handler-arch-builder .
 
 # RHEL/Fedora
-docker build -f scripts/docker/Dockerfile.rhel -t android-file-handler-rhel-builder .
+podman build -f scripts/docker/Dockerfile.rhel -t android-file-handler-rhel-builder .
 ```
 
 Run the build:
 ```bash
 # Debian
-docker run --rm -v $(pwd):/workspace -w /workspace android-file-handler-debian-builder
+podman run --rm -v $(pwd):/workspace:Z -w /workspace android-file-handler-debian-builder
 
 # Arch
-docker run --rm -v $(pwd):/workspace -w /workspace android-file-handler-arch-builder
+podman run --rm -v $(pwd):/workspace:Z -w /workspace android-file-handler-arch-builder
 
 # RHEL/Fedora
-docker run --rm -v $(pwd):/workspace -w /workspace android-file-handler-rhel-builder
+podman run --rm -v $(pwd):/workspace:Z -w /workspace android-file-handler-rhel-builder
 ```
 
 ## Output
@@ -81,9 +86,13 @@ After building, you'll find:
 
 ### Virtualenv Conflicts
 
-The Docker Compose configuration automatically excludes the host's `.venv` directory to prevent conflicts between the host Python environment and the container Python environment. Each container creates its own virtualenv in `/tmp/poetry-cache`.
+The Podman Compose configuration automatically excludes the host's `.venv` directory to prevent conflicts between the host Python environment and the container Python environment. Each container creates its own virtualenv in `/tmp/poetry-cache`.
 
-If you encounter virtualenv-related errors, ensure you're using the latest docker-compose.yml configuration.
+If you encounter virtualenv-related errors, ensure you're using the latest podman-compose.yml configuration.
+
+### SELinux (Fedora/RHEL hosts)
+
+Volume mounts use the `:Z` suffix to apply the correct SELinux labels automatically. If you encounter permission errors, ensure the `:Z` suffix is present on volume mounts.
 
 ## Cleaning Up
 
@@ -92,9 +101,9 @@ Remove build artifacts:
 rm -rf dist pkg_dist_* dist_*
 ```
 
-Remove Docker volumes and containers:
+Remove Podman containers and volumes:
 ```bash
-docker compose down -v
+podman-compose down -v
 ```
 
 ## Customization

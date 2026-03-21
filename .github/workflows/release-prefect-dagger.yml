@@ -1,0 +1,295 @@
+# Multi-platform build + packaging workflow
+# Thin GitHub Actions wrapper around Prefect + Dagger pipeline.
+#
+# Architecture:
+#   - Windows build runs natively on windows-latest (cannot containerize)
+#   - Linux builds run via Dagger containers orchestrated by Prefect
+#   - Signing, release creation, and S3 upload handled by Prefect tasks
+#   - Container runtime: Podman (Dagger connects via Podman socket)
+#
+# Local equivalent:
+#   poetry run python -m ci.prefect_flow full \
+#     --gpg-passphrase "$GPG_PASSPHRASE" \
+#     --github-token "$GITHUB_TOKEN"
+name: Build Multi-Platform Binaries
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: release-workflow
+  cancel-in-progress: true
+
+env:
+  CI_CD: true
+  CI_CD_PAT: ${{ secrets.CI_CD_PAT }}
+
+jobs:
+
+  # ── Windows Build (native runner — cannot containerize) ──────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Ensure Poetry is on PATH
+        shell: pwsh
+        run: |
+          $poetryPath = Join-Path $env:USERPROFILE ".local\bin"
+          Write-Output $poetryPath >> $Env:GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Build Windows executable
+        run: poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
+
+      - name: Build Windows installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = (poetry version -s).Trim()
+          Write-Output "Building installer for version $version"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "scripts\windows\android-file-handler-setup.iss" `
+            "/DMyAppVersion=$version"
+
+      - name: Import GPG key
+        shell: pwsh
+        run: |
+          $env:GPG_TTY = "not a tty"
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys
+
+      - name: Sign and hash Windows artifacts
+        shell: pwsh
+        run: |
+          $passphraseFile = New-TemporaryFile
+          try {
+            "${{ secrets.GPG_PASSPHRASE }}" | Out-File -FilePath $passphraseFile -Encoding ASCII -NoNewline
+
+            # Sign and hash standalone executable
+            $exePath = Get-ChildItem -Path dist -Filter "android-file-handler-windows.exe" |
+                       Select-Object -First 1 -ExpandProperty FullName
+            if (-not $exePath) { Write-Error "Standalone executable not found"; exit 1 }
+            gpg --batch --yes --passphrase-file "$passphraseFile" --detach-sign --armor "$exePath"
+            $hash = (Get-FileHash -Path "$exePath" -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path -Leaf $exePath)" |
+              Out-File -FilePath "dist/android-file-handler-windows.sha256" -Encoding ASCII -NoNewline
+
+            # Sign and hash installer
+            $setupPath = Get-ChildItem -Path dist -Filter "android-file-handler-setup.exe" |
+                         Select-Object -First 1 -ExpandProperty FullName
+            if (-not $setupPath) { Write-Error "Installer not found"; exit 1 }
+            gpg --batch --yes --passphrase-file "$passphraseFile" --detach-sign --armor "$setupPath"
+            $setupHash = (Get-FileHash -Path "$setupPath" -Algorithm SHA256).Hash.ToLower()
+            "$setupHash  $(Split-Path -Leaf $setupPath)" |
+              Out-File -FilePath "dist/android-file-handler-setup.sha256" -Encoding ASCII -NoNewline
+          }
+          finally {
+            if (Test-Path $passphraseFile) { Remove-Item $passphraseFile -Force }
+          }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: |
+            dist/android-file-handler-windows.exe
+            dist/android-file-handler-windows.exe.asc
+            dist/android-file-handler-windows.sha256
+            dist/android-file-handler-setup.exe
+            dist/android-file-handler-setup.exe.asc
+            dist/android-file-handler-setup.sha256
+
+  # ── Linux Builds (Prefect + Dagger with Podman backend) ─────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install project + CI dependencies
+        run: poetry install --with ci
+
+      - name: Set up Podman
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman
+          # Start rootful Podman socket for Dagger compatibility
+          sudo systemctl enable --now podman.socket
+          echo "DOCKER_HOST=unix:///run/podman/podman.sock" >> "$GITHUB_ENV"
+
+      - name: Install Dagger CLI
+        uses: dagger/dagger-for-github@v7
+        with:
+          verb: version
+
+      - name: Log in to GHCR (Podman)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+            podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build all Linux distros (Prefect + Dagger)
+        run: poetry run python -m ci.prefect_flow build-linux
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign Linux artifacts
+        run: |
+          poetry run python -m ci.prefect_flow sign \
+            --gpg-passphrase "${{ secrets.GPG_PASSPHRASE }}"
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: |
+            dist/android-file-handler_*.deb
+            dist/android-file-handler_*.deb.asc
+            dist/android-file-handler-debian.sha256
+            pkg_dist_debian/**
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: |
+            dist/*.pkg.tar.*
+            dist/android-file-handler-arch.sha256
+            pkg_dist_arch/**
+
+      - name: Upload RHEL package
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhel-package
+          path: |
+            dist/*.rpm
+            dist/*.rpm.asc
+            dist/android-file-handler-rhel.sha256
+            pkg_dist_rhel/**
+
+  # ── Release + S3 Upload (Prefect) ───────────────────────────────────
+  do-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install project + CI dependencies
+        run: poetry install --with ci
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./dist
+
+      - name: Create GitHub release (Prefect)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          poetry run python -m ci.prefect_flow release \
+            --github-token "$GITHUB_TOKEN"
+
+  upload-s3:
+    runs-on: ubuntu-latest
+    needs: do-release
+    if: needs.do-release.result == 'success'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install AWS CLI
+        run: python -m pip install --upgrade pip awscli
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./binaries
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload artifacts to S3
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.S3_BUCKET }}" ]; then
+            echo "S3_BUCKET secret not set; skipping upload"
+            exit 0
+          fi
+          aws s3 sync ./binaries s3://${{ secrets.S3_BUCKET }}/builds/${{ github.run_id }}/ --acl private
+        env:
+          AWS_PAGER: ""
+
+  sync-wiki:
+    needs: do-release
+    if: needs.do-release.result == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/sync-wiki.yml
+    with:
+      branch: main
+    secrets: inherit

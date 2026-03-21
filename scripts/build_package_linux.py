@@ -7,7 +7,7 @@ import sys
 import re
 from pathlib import Path
 from enum import Enum
-from typing import List
+from typing import List, TypedDict
 
 
 class DistroType(Enum):
@@ -16,7 +16,19 @@ class DistroType(Enum):
     RHEL = "rhel"
 
 
-def run_command(cmd: list[str], check: bool = True, working_dir: str | None = None) -> subprocess.CompletedProcess:
+class DistroConfigDict(TypedDict):
+    """Type definition for distro configuration."""
+
+    name: str
+    bin_path: str
+    pkg_suffix: str
+    spec_file: str
+    pkg_type: str
+    architecture: str
+    postinstall: str | None
+
+
+def run_command(cmd: list[str], check: bool = True, working_dir: str | None = None) -> subprocess.CompletedProcess[bytes]:
     """Run command and handle errors."""
     print(f"Running: {' '.join(cmd)}")
     try:
@@ -29,9 +41,9 @@ def run_command(cmd: list[str], check: bool = True, working_dir: str | None = No
         sys.exit(1)
 
 
-def get_distro_config(distro_type: DistroType) -> dict:
+def get_distro_config(distro_type: DistroType) -> DistroConfigDict:
     """Get configuration for specific distro type."""
-    configs = {
+    configs: dict[DistroType, DistroConfigDict] = {
         DistroType.DEBIAN: {
             "name": "Debian",
             "bin_path": "usr/local/bin",
@@ -131,10 +143,11 @@ def package_with_fpm(distro_type: DistroType, version: str, project_root: Path) 
     # Add distro-specific options
     if distro_type == DistroType.DEBIAN:
         output_file = dist_dir / f"android-file-handler_{version}_{config['architecture']}.deb"
+        postinstall = config["postinstall"]
         fpm_cmd.extend([
             "--deb-user", "root",
             "--deb-group", "root",
-            "--after-install", config["postinstall"],
+            *(["--after-install", postinstall] if postinstall else []),
             "-p", str(output_file)
         ])
     elif distro_type == DistroType.ARCH:
@@ -144,9 +157,9 @@ def package_with_fpm(distro_type: DistroType, version: str, project_root: Path) 
         ])
     elif distro_type == DistroType.RHEL:
         output_file = dist_dir / f"android-file-handler-{version}.{config['architecture']}.rpm"
+        postinstall = config["postinstall"]
         fpm_cmd.extend([
-            "--prefix", "/usr/bin",
-            "--after-install", config["postinstall"],
+            *(["--after-install", postinstall] if postinstall else []),
             "-p", str(output_file)
         ])
 

@@ -39,6 +39,13 @@ pytest-cov = "^7.0.0"
 [tool.poetry.group.build.dependencies]
 pyinstaller = "^6.1.0"
 
+[tool.poetry.group.ci]
+optional = true
+
+[tool.poetry.group.ci.dependencies]
+dagger-io = ">=0.15.0"
+prefect = ">=3.0.0"
+
 [tool.black]
 line-length = 88
 target-version = ['py313']

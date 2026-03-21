@@ -19,7 +19,7 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
 fi
 
 # Ensure installed binary is executable
-if [ -f /usr/local/bin/android-file-handler ]; then
+if [ -f /usr/bin/android-file-handler ]; then
   chmod 0755 /usr/bin/android-file-handler || true
 fi
 

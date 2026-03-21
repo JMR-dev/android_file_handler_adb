@@ -1,9 +1,18 @@
-# Docker Compose configuration for local multi-platform builds
-# Matches the exact images and configurations from .github/workflows/release.yml
+# DEPRECATED: This file is kept for backward compatibility.
+# Use podman-compose.yml instead:
+#   podman-compose -f podman-compose.yml up --build
+#
+# Docker Compose will also read podman-compose.yml if you symlink:
+#   ln -sf podman-compose.yml docker-compose.yml
+#
+# --- Original configuration follows (mirrors podman-compose.yml) ---
+
+# Podman Compose / Docker Compose configuration for local multi-platform builds
+# Matches the exact images and configurations from .github/workflows/release-prefect-dagger.yml
 #
 # Usage:
-#   Build all distributions:     docker-compose up --build
-#   Build specific distro:       docker-compose up --build debian
+#   Build all distributions:     podman-compose up --build
+#   Build specific distro:       podman-compose up --build debian
 #
 # Each service builds a distribution package and outputs to:
 #   - dist/                     - Final packaged files (.deb, .rpm, .pkg.tar.zst)
