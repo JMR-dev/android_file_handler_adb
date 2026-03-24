@@ -20,6 +20,10 @@
 AppId={{8F2B3A7E-4D1C-4E8F-9A2B-6C7D8E9F0A1B}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+; AppVerName controls the registry DisplayName value. Without it Inno Setup
+; defaults to "AppName version AppVersion" which breaks exact-name lookups.
+; Windows convention: DisplayName = product name, DisplayVersion = version.
+AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -31,7 +35,8 @@ OutputDir=..\..\dist
 OutputBaseFilename=android-file-handler-setup
 SetupIconFile=..\..\icon_media\robot_files_256.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-Compression=lzma2/ultra64
+Compression=lzma2/normal
+LZMADictionarySize=16384
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible

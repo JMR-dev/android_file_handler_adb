@@ -22,31 +22,31 @@ Vagrant.configure("2") do |config|
 
   config.winrm.username = "vagrant"
   config.winrm.password = "vagrant"
-  config.winrm.transport = :plaintext
+  config.winrm.transport = :plaintext  # Vagrant's own comms (boot check, provision)
   config.winrm.basic_auth_only = true
 
   config.vm.guest = :windows
   config.vm.boot_timeout = 900
   config.vm.graceful_halt_timeout = 120
 
-  config.vm.network "forwarded_port", guest: 5985, host: 55985
+  # Automatically select the Default Switch for Hyper-V to avoid interactive prompt
+  config.vm.network "public_network", bridge: "Default Switch"
+
+  config.vm.network "forwarded_port", guest: 5985, host: 55985  # Vagrant plaintext WinRM
+  config.vm.network "forwarded_port", guest: 5986, host: 55986  # PSSession HTTPS WinRM
 
   config.vm.provider "hyperv" do |hv|
     hv.vmname = "afh-win11-test"
-    hv.memory = 4096
-    hv.maxmemory = 4096
-    hv.cpus = 2
+    hv.memory = 8192
+    hv.maxmemory = 8192
+    hv.cpus = 4
     hv.enable_enhanced_session_mode = true
     hv.linked_clone = true
   end
 
-  # SMB synced folder — Hyper-V does not support VirtualBox shared folders.
-  # Vagrant will prompt for host credentials on first `vagrant up` to set up the SMB share.
-  config.vm.synced_folder "..", "/vagrant_project",
-    type: "smb",
-    smb_username: ENV["VAGRANT_SMB_USERNAME"],
-    smb_password: ENV["VAGRANT_SMB_PASSWORD"],
-    mount_options: ["ro"]
+  # Disable default Vagrant synced folder to prevent SMB credential prompts.
+  # Files are transferred directly via PSSession by run_vagrant_tests.ps1.
+  config.vm.synced_folder ".", "/vagrant", disabled: true
 
   config.vm.provision "shell",
     path: "provision.ps1",

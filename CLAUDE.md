@@ -101,7 +101,7 @@ See [scripts/docker/README.md](scripts/docker/README.md) for detailed Docker bui
 poetry run pyinstaller scripts/spec_scripts/android-file-handler-windows.spec
 
 # Windows installer (Inno Setup, after PyInstaller build)
-# Inno Setup 6 is pre-installed on GitHub Actions windows-latest runners
+# Inno Setup 6.7.1 is installed by the CI/CD workflow via Chocolatey (pinned version)
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" scripts\windows\android-file-handler-setup.iss /DMyAppVersion=0.1.1
 
 # Linux packages use distro-specific spec files:

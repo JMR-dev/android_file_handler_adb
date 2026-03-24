@@ -16,3 +16,5 @@ pkg*
 __pycache__/
 *.py[cod]
 *$py.class
+.vagrant/
+vagrant_test_results/
