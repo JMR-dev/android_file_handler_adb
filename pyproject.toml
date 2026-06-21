@@ -12,9 +12,9 @@ dependencies = ["requests>=2.32.4,<3.0.0", "platformdirs>4.0.0,<5.0.0"]
 
 [tool.poetry.dependencies]
 python = ">=3.13, <3.15"
-requests = "^2.32.5"
+requests = "^2.33.0"
 platformdirs = "^4.5.0"
-urllib3 = "^2.0"
+urllib3 = "^2.7"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -32,7 +32,7 @@ mypy = "^1.18.2"
 pre-commit = "^4.3.0"
 
 [tool.poetry.group.test.dependencies]
-pytest = "^9.0.2"
+pytest = "^9.0.3"
 pytest-mock = "^3.15.1"
 pytest-cov = "^7.0.0"
 
