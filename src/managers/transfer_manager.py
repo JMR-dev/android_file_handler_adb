@@ -255,7 +255,6 @@ class TransferManager:
                         lambda: self.dialog_manager.show_transfer_stats(
                             stats,
                             direction.capitalize(),
-                            self.device_manager.adb_manager.deduplicator,
                         ),
                     )
 
