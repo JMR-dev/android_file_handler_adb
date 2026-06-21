@@ -211,58 +211,6 @@ class DialogManager:
         dialog.protocol("WM_DELETE_WINDOW", on_close)
         ok_button.config(command=on_close)
 
-    def show_disable_debugging_reminder(self) -> None:
-        """Show reminder to disable USB debugging after transfer."""
-        msg = (
-            "Transfer completed!\n\n"
-            "For security, please disable USB debugging when done:\n"
-            "Settings → Developer Options → disable 'USB debugging'."
-        )
-        messagebox.showinfo("Disable USB Debugging", msg)
-
-    def show_transfer_stats(
-        self, stats: dict, operation: str, deduplicator=None
-    ) -> None:
-        """Show transfer statistics dialog.
-
-        Args:
-            stats: Dictionary containing transfer statistics
-            operation: Type of operation ("Pull" or "Push")
-            deduplicator: Optional deduplicator instance for byte formatting
-        """
-        # Format bytes saved
-        bytes_saved_str = ""
-        if stats["bytes_saved"] > 0:
-            if deduplicator and hasattr(deduplicator, "format_bytes"):
-                bytes_saved_str = (
-                    f" ({deduplicator.format_bytes(stats['bytes_saved'])} saved)"
-                )
-            else:
-                bytes_saved_str = f" ({stats['bytes_saved']} bytes saved)"
-
-        # Build message
-        title = f"{operation} Transfer Complete"
-
-        if stats["total_files"] == 0:
-            message = "No files were found to transfer."
-        else:
-            message_parts = [
-                f"Transfer completed successfully!\n",
-                f"Files found: {stats['total_files']}",
-                f"Files transferred: {stats['transferred']}",
-                f"Duplicate files skipped: {stats['skipped']}{bytes_saved_str}",
-            ]
-
-            if stats["skipped"] > 0:
-                message_parts.append(
-                    f"\nDuplicate detection helped avoid unnecessary transfers!"
-                )
-
-            message = "\n".join(message_parts)
-
-        # Show dialog
-        messagebox.showinfo(title, message)
-
     def show_error(self, title: str, message: str) -> None:
         """Show an error dialog.
 
@@ -386,7 +334,7 @@ class DialogManager:
             side="right"
         )
 
-    def show_transfer_stats(self, stats: dict, operation: str):
+    def show_transfer_stats(self, stats: dict, operation: str) -> None:
         """Show transfer statistics in a dialog.
 
         Args:
@@ -437,7 +385,7 @@ class DialogManager:
         # Close button
         tk.Button(main_frame, text="Close", command=stats_window.destroy).pack()
 
-    def show_disable_debugging_reminder(self):
+    def show_disable_debugging_reminder(self) -> None:
         """Show reminder about disabling USB debugging after transfer."""
         messagebox.showinfo(
             "Security Reminder",
